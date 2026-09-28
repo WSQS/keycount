@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+"""keycount GDExtension 构建脚本。
+
+    scons custom_api_file=api/extension_api.json
+
+api/extension_api.json 是用**你本机那个 Godot 自己 dump 出来的**
+（`godot --headless --dump-extension-api`），所以版本是精确对齐的，不靠猜。
+"""
+import os
+import sys
+
+env = SConscript("godot-cpp/SConstruct")
+
+# 平台核心（native/）跟 GDExtension 接线层分开：
+# kc_hook.cpp 不知道 Godot 的存在，将来若改成引擎内模块可以直接复用。
+env.Append(CPPPATH=["src/", "../native/"])
+
+sources = Glob("src/*.cpp")
+sources.append(File("../native/kc_hook.cpp"))
+
+if env["platform"] == "windows":
+    env.Append(LIBS=["user32"])
+
+library = env.SharedLibrary(
+    "bin/keycount{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    source=sources,
+)
+
+env.NoCache(library)
+Default(library)

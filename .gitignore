@@ -1,0 +1,46 @@
+# ---- 构建产物（可随时重建，不进仓库）----
+gdext/godot-cpp/
+gdext/bin/
+gdext/.sconsign*
+gdext/api/extension_api.json
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# 扩展编出来的 dll（pet 里那份是拷贝，由 run-pet.ps1 或 scons 生成）
+pet/addons/keycount/bin/
+
+# 独立验证 exe
+native/test_hook.exe
+
+# C# 探针（早前验证钩子用的，保留源码即可）
+evidence/cs-probe/bin/
+evidence/cs-probe/obj/
+
+# ---- Godot ----
+pet/.godot/
+*.import
+export_presets.cfg
+
+# ---- 运行产物：日志与原始全屏截图（可随时重新生成）----
+*.log
+spike-godot/stdout*.txt
+spike-godot/godot-stdout.txt
+spike-godot/run*.log
+spike-godot/full-*.png
+shots/full-*.png
+pet/run.log
+pet/import.txt
+pet/settings.txt
+gdext/api/dump-stdout.txt
+native/hook-run*.txt
+native/inject-received.txt
+
+# ---- 已废弃阶段的残留（若还在，不要提交）----
+.venv/
+__pycache__/
+uv.lock
+pet-spike/node_modules/

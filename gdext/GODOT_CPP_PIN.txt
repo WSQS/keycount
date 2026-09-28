@@ -1,0 +1,16 @@
+godot-cpp 版本固定记录
+========================================
+仓库    https://github.com/godotengine/godot-cpp
+commit  507ed9d840c01a3c5b2a39af8bb4000bfac30bf5
+日期    2026-09-28
+获取    git clone --depth 1 https://github.com/godotengine/godot-cpp.git
+        (克隆后不必切分支：这个 commit 自带 gdextension/extension_api-4-7.json)
+
+为什么不用猜版本：godot-cpp 从 v10 起版本号与 Godot 独立，用 api_version 指定目标。
+本项目对准 Godot 4.7.2，所以构建命令是 api_version=4.7。
+
+为什么记在文件里而不是做成 submodule：godot-cpp 是 35MB 的浅克隆、且已被 .gitignore 忽略。
+想要更强的可复现性，可以改成 pinned submodule：
+    git submodule add https://github.com/godotengine/godot-cpp.git gdext/godot-cpp
+    git submodule update --init --depth 1
+代价：下次构建时源码 mtime 全变，godot-cpp 那 1091 个编译单元要重编一次（约 2-3 分钟）。
