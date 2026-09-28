@@ -13,18 +13,84 @@ param(
   [string]$Godot = "C:\Program Files (x86)\Steam\steamapps\common\Godot Engine\godot.windows.opt.tools.64.exe",
   [string]$RenderingDriver = "opengl3",               # 必须是 opengl3，Vulkan 下透明会变黑方块
   [switch]$Build,                                     # 强制重新编扩展
-  [switch]$NoBuild                                    # 明确禁止自动编
+  [switch]$NoBuild,                                   # 明确禁止自动编
+  [switch]$Restart,                                   # 先优雅关掉已在跑的那个，再启动
+  [switch]$AllowMultiple                              # 明知会双倍计数也要再开一个
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)   # evidence/ 的上一级
 if (-not $Project) { $Project = Join-Path $root "pet" }
+$procName = Split-Path -Leaf $Godot                              # godot.windows.opt.tools.64.exe
 
 if (-not (Test-Path $Godot)) {
   throw "找不到 Godot：$Godot`n用 -Godot 指定路径（需要 4.7.2，扩展的 api_version 对准它）"
 }
 if (-not (Test-Path (Join-Path $Project "project.godot"))) {
   throw "找不到工程：$Project`n用 -Project 指定路径"
+}
+
+# ---- 防重复启动 ----
+# 每个宠物进程都会装一个自己的全局钩子，所以两个宠物 = 同一下按键被记两次，数字直接翻倍。
+# 按**命令行里是否出现本工程路径**来判断，而不是按进程名 ——
+# 否则你自己开着 Godot 编辑器看别的工程也会被误拦。
+function Get-PetProcesses {
+  # 不走正则：把两边都规范成「反斜杠 + 小写」再做子串匹配。
+  # Windows 路径本来就大小写不敏感，这样也不用担心正则转义。
+  $needle = $Project.Replace('/', '\').ToLowerInvariant()
+  $raw = @(Get-CimInstance Win32_Process -Filter "Name = '$procName'" -ErrorAction SilentlyContinue)
+  $matched = @($raw | Where-Object {
+    if (-not $_.CommandLine) { return $false }   # 刚启动的进程有时读不到命令行
+    $_.CommandLine.Replace('/', '\').ToLowerInvariant().Contains($needle)
+  })
+  # 前面这个逗号很关键：保证空结果也返回「数组」而不是「什么都没有」。
+  # PowerShell 里把空管道结果赋给变量会得到 $null，而 $null.Count 也是 $null，
+  # 于是 `$existing.Count -eq 0` 判为假 —— 重试循环会被静默跳过，守卫完全失效。
+  # 这个坑我在这里实测踩到过，不是理论问题。
+  return ,$matched
+}
+
+$existing = Get-PetProcesses
+if ($existing.Count -lt 1) {
+  # 刚启动的进程有时读不到 CommandLine，_此处重试两次，减少「紧接着又启动一个」的竞态
+  for ($i = 0; $i -lt 3; $i++) {
+    Start-Sleep -Milliseconds 250
+    $existing = Get-PetProcesses
+    if ($existing.Count -gt 0) { break }
+  }
+}
+if ($existing.Count -gt 0) {
+  $pids = ($existing | ForEach-Object { $_.ProcessId }) -join ", "
+  if ($Restart) {
+    Write-Output "已经在跑（PID: $pids），按 -Restart 优雅关闭它 ..."
+    foreach ($p in $existing) {
+      $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+      if ($proc) {
+        # CloseMainWindow 发的是 WM_CLOSE → 宠物会走 _shutdown：落盘 + 记录运行结束
+        if (-not $proc.CloseMainWindow()) { Write-Output "  PID $($p.ProcessId) 关闭请求失败，强杀" ; $proc.Kill() }
+      }
+    }
+    # 等它真的退出，别紧接着又起一个
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-PetProcesses).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    if ((Get-PetProcesses).Count -gt 0) {
+      Write-Output "  等不到它退出，强杀"
+      Get-PetProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      Start-Sleep -Seconds 1
+    }
+    Write-Output "  旧实例已退出（它的数据已经落盘了）"
+  } elseif (-not $AllowMultiple) {
+    Write-Output "已经有宠物在跑（PID: $pids），拒绝再启动一个。"
+    Write-Output ""
+    Write-Output "原因：每个宠物进程都会装自己的全局键盘钩子，两个一起跑会把同一下按键记两次，"
+    Write-Output "      计数直接翻倍（我实测过：9 下按键变成了 18）。"
+    Write-Output ""
+    Write-Output "想重启：  -Restart      （会优雅关掉旧的：先落盘、再记录运行结束）"
+    Write-Output "确实要两个：-AllowMultiple（数字会翻倍，除非你另有打算）"
+    exit 1
+  } else {
+    Write-Output "警告：-AllowMultiple 已指定，现在会有 $($existing.Count + 1) 个宠物，计数会翻倍。"
+  }
 }
 
 # ---- 扩展 dll 不在就编一次，省得「跑起来发现没加载扩展」 ----

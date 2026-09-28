@@ -36,6 +36,7 @@ spike-godot/run*.log
 spike-godot/full-*.png
 shots/full-*.png
 pet/run.log
+pet/stdout*.txt
 pet/import.txt
 pet/settings.txt
 gdext/api/dump-stdout.txt

@@ -423,6 +423,52 @@ String KeyCountStore::get_last_error() const {
 	return to_gd(store_.last_error());
 }
 
+// ============================= KeyCountGuard ============================
+
+void KeyCountGuard::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("try_acquire", "name"), &KeyCountGuard::try_acquire);
+	ClassDB::bind_method(D_METHOD("release"), &KeyCountGuard::release);
+	ClassDB::bind_method(D_METHOD("is_held"), &KeyCountGuard::is_held);
+}
+
+KeyCountGuard::~KeyCountGuard() {
+	release();
+}
+
+bool KeyCountGuard::try_acquire(const String &name) {
+#ifdef _WIN32
+	release();
+	Char16String wname = name.utf16();
+	HANDLE h = CreateMutexW(nullptr, TRUE, reinterpret_cast<LPCWSTR>(wname.get_data()));
+	if (h == nullptr) {
+		return false;
+	}
+	if (GetLastError() == ERROR_ALREADY_EXISTS) {
+		// 别人拿着：把自己这个句柄关掉，不要假装拿到
+		CloseHandle(h);
+		return false;
+	}
+	handle_ = h;
+	return true;
+#else
+	(void)name;
+	return true;
+#endif
+}
+
+void KeyCountGuard::release() {
+#ifdef _WIN32
+	if (handle_ != nullptr) {
+		CloseHandle(reinterpret_cast<HANDLE>(handle_));
+		handle_ = nullptr;
+	}
+#endif
+}
+
+bool KeyCountGuard::is_held() const {
+	return handle_ != nullptr;
+}
+
 // ============================== 库初始化 ==============================
 
 static void initialize_keycount_module(ModuleInitializationLevel p_level) {
@@ -432,6 +478,7 @@ static void initialize_keycount_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(KeyCountHook);
 	GDREGISTER_CLASS(KeyCountWindow);
 	GDREGISTER_CLASS(KeyCountStore);
+	GDREGISTER_CLASS(KeyCountGuard);
 	remember_prev_foreground();
 }
 

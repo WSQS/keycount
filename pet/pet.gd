@@ -34,6 +34,8 @@ var _last_flush: float = 0.0
 var _flush_fail_count: int = 0
 
 var _log: FileAccess = null
+# 必须存成成员：RefCounted 引用计数归零会立刻析构，那样锁就释放了
+var _guard: KeyCountGuard = null
 var _log_t: float = 0.0
 var _focus_true_frames: int = 0
 var _input_key_count: int = 0
@@ -57,7 +59,23 @@ func _stamp() -> String:
 	return "%04d-%02d-%02d %02d:%02d:%02d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second]
 
 func _ready() -> void:
+	# ---- 单实例：两个宠物会把每一下按键记两次（实测过，9 下变 18）----
+	# 启动器里那层查进程只能拦住正常路径，而且刚启动的进程有时读不到 CommandLine，
+	# 所以真正牢的保证在这里。
+	#
+	# 顺序很重要：**先抢锁、再开日志**。
+	# 否则第二个实例会在抢锁之前就把第一个实例的 run.log 截掉（本文件用 WRITE 模式打开），
+	# 两个进程同时写同一个日志文件，读出来直接是乱码。
+	_guard = KeyCountGuard.new()
+	if not _guard.try_acquire("keycount_pet_single_instance"):
+		# 不能写日志（那是共享文件），打到 stdout 去 —— 用 -RedirectStandardOutput 能收到
+		print("keycount: 已经有一个宠物在跑，本进程退出（两个一起跑会让计数翻倍）")
+		get_window().hide()   # 别在屏幕上一闪
+		get_tree().quit()
+		return
+
 	_log = FileAccess.open(ProjectSettings.globalize_path("res://") + LOG_PATH, FileAccess.WRITE)
+
 	var wall := _stamp()
 	_logline("启动 %s  版本 %s" % [wall, VERSION])
 
@@ -214,6 +232,8 @@ func _exit_tree() -> void:
 	_shutdown()
 
 func _shutdown() -> void:
+	if _guard != null:
+		_guard.release()
 	if store == null or not _db_ok:
 		return
 	_flush(true)
