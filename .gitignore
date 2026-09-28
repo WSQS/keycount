@@ -15,6 +15,9 @@ pet/addons/keycount/bin/
 
 # 独立验证 exe
 native/test_hook.exe
+native/test_store.exe
+native/sqlite3.o
+native/test_store.db*
 
 # C# 探针（早前验证钩子用的，保留源码即可）
 evidence/cs-probe/bin/

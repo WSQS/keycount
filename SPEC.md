@@ -135,12 +135,17 @@ CREATE TABLE key_hourly (
 ) WITHOUT ROWID;
 
 CREATE TABLE run_log (          -- 用来发现「昨天其实没在跑」
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at TEXT NOT NULL,
-  ended_at   TEXT,
+  ended_at   TEXT,              -- NULL = 那次没正常结束（被强杀/断电）
   version    TEXT NOT NULL,
   note       TEXT
 );
 ```
+
+> 比早期草案多了一个 `id`：`end_run` 要能定位「当前那次」才能回填 `ended_at`。
+> `ended_at` 为空不是脏数据，它是**刻意的信号** —— 命令行报表靠它把「那天没敲键盘」
+> 和「那天没在跑」区分开。只靠计数是分不出这两件事的。
 
 **只存计数。不存按键顺序、不存字符、不存窗口标题。** 一旦存了有序按键流，就等于存了你的密码。
 
@@ -249,19 +254,68 @@ ALIVE ... focused=false focus_true_frames=0 input_keys=0 dropped=0   ← 全程�
 - 直接跑工程不会加载 GDExtension：必须先过一次导入（`godot --headless --editor --quit --path pet`）
   生成 `.godot/extension_list.cfg`。
 
+## 落盘：已跑通（2026-09-28）
+
+底层是**真 SQLite**（3.53.4 amalgamation，编进扩展，见 `thirdparty/sqlite/PIN.txt`）。
+不自己发明文件格式的理由：崩溃安全（WAL）、事务、以及「宠物没跑时外部工具也能查库」——
+这三件事 SQLite 已经替我们测了十几年。
+
+| 文件 | 职责 |
+|---|---|
+| `thirdparty/sqlite/` | SQLite amalgamation，版本固定记录在 PIN.txt |
+| `native/kc_store.h/.cpp` | 存储层，**不依赖 Godot**（分层同 kc_hook） |
+| `native/test_store.cpp` + `build_store.sh` | 独立验证：39 条断言，不需要 Godot 也不需要宠物在跑 |
+| `gdext/` → `KeyCountStore` | 薄包装，把 kc_store 暴露给 GDScript |
+| `tools/keycount.py` | 命令行报表，直读同一个库 |
+
+### 职责划分（刻意这样切）
+
+扩展只负责「可靠写进去 / 查得回来」。**什么算一天、哪个小时、多久 flush 一次，全在 GDScript**：
+那些是业务口径，改口径不该重编扩展。
+
+### 写入策略与代价
+
+- 攒到 **10 秒**或 **200 下** 就落一次盘（一个事务写完一批）
+- **落盘失败不清空待写数据** —— 留在内存里下次重试，并在日志里报错。静默丢数据比报错严重得多
+- 库不可用时宠物变红并显示 `DB UNAVAILABLE`，**不假装一切正常**
+- 查询接口一律返回 `{ok: bool, ...}`，让调用方能区分「真的是 0」与「查询失败」
+- 代价：**被强杀/断电最多丢 10 秒的按键**。这是明写的取舍，也是为什么需要
+  `run_log.ended_at IS NULL` 这个信号
+
+### 实测验收
+
+```
+第一次运行  → 已落盘 8 个桶 / 已记录本次运行结束
+第二次启动  → 2026-09-28 库里已有 40 下（15 种键）      ← 数字续上了，没归零
+强杀后启动  → 注意：上一次运行没有正常结束（17:16:03），可能是被强杀或断电
+命令行      → 总计 40 下 / 按小时分布 / Top 10 键带百分比
+```
+
+`test_store.exe` 里有两条刻意的不变量断言：
+1. **表里永远不能出现内容类列** —— 逐列比对 `day/hour/key/count`，再反向断言列名里没有
+   `text/seq/order/title/window/clip` 之类的词。一旦出现有序按键流，就等于存下了密码。
+2. **用独立的 sqlite3 连接打开库** —— 证明它真的是标准 SQLite 文件，外部工具读得进。
+
 ## 命令接口
 
 ```
-keycount daemon           # 启动 collector
-keycount pet              # 启动宠物
-keycount today            # 终端也能查：今日总数 + 各键 Top 10
-keycount report 2026-09-27
-keycount week             # 最近 7 天每日总数
+# 启动宠物（必须用启动器，见「抢焦点这件事打了三仗」）
+powershell -File evidence/run-pet.ps1
+
+# 命令行报表（直读同一个库，宠物没跑也能用）
+uv run --no-project python tools/keycount.py today
+uv run --no-project python tools/keycount.py report 2026-09-27
+uv run --no-project python tools/keycount.py week
+uv run --no-project python tools/keycount.py runs   # 能看出有没有没正常结束的运行
 ```
+
+库位置：`%APPDATA%\Godot\app_userdata\keycount pet\keycount.db`（Godot 的 `user://`）。
+`tools/keycount.py` 可用 `--db` 或环境变量 `KC_DB` 指向别处。
 
 ## 分阶段
 
-- **v0** collector 跑通：钩子 → SQLite → 命名管道推帧。终端查询可用。
-- **v1** pet 骨架：透明置顶窗口 + 占位几何体 + 状态机 + 拖动 + 点击看报表。**链路优先，美术后补。**
-- **v2** 换成真素材（精灵图或 Live2D），音效、托盘菜单、开机自启。
+- ~~**v0** collector 跑通：钩子 → SQLite → 终端查询可用~~ ✅
+- ~~**v1** pet 骨架：透明置顶窗口 + 占位几何体 + 状态机 + 拖动~~ ✅（落盘也已并入）
+- **v2** 点击穿透（现在整个 380×380 方框挡鼠标）+ 托盘图标 + 开机自启 + 中文字体
+- **v3** 换成真素材（精灵图或 Live2D）；点宠物弹出今日/本周报表
 - **不做**：鼠标计数、窗口标题、按键回放、云同步、读取输入正文。

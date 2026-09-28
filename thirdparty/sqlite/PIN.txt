@@ -1,0 +1,18 @@
+SQLite 版本固定记录
+========================================
+源码    https://sqlite.org/2026/sqlite-amalgamation-3530400.zip
+版本    3.53.4
+下载日期 2026-09-28
+字节数  2946650（校验过：与服务端 Content-Length 一致；第一次下载被截断过，注意核对）
+文件    sqlite3.c / sqlite3.h / sqlite3ext.h
+
+为什么用 SQLite 而不是自己发明文件格式：
+崩溃安全（WAL）、事务、以及「宠物没跑时也能用外部工具查库」这三件事 SQLite 已经替我们
+解决并测试了十几年。自己写「追加日志 + 压缩」比引入一个 9.5MB 的 C 文件更容易出错。
+
+编译开关见 gdext/SConstruct 与 native/build_store.sh，要点：
+  SQLITE_THREADSAFE=1          宠物 UI 线程与写入在同一进程，保留线程安全
+  SQLITE_OMIT_LOAD_EXTENSION   不用运行时加载扩展，去掉一整块攻击面
+  SQLITE_DQS=0                 禁止双引号当字符串字面量，少一类静默错误
+
+升级方式：换掉 sqlite3.c/h，改本文件的版本号与字节数，重编。

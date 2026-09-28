@@ -15,7 +15,8 @@
 | 键名归一化（`Shift+A` → `a`） | ✅ 自检 25/25 |
 | **不抢键盘焦点** | ✅ `focus_true_frames=0`、`input_keys=0`，`hwndFocus` 始终是别的窗口 |
 | 宠物状态机（idle / typing / excited / sleepy） | ✅ 由实时 KPM 驱动 |
-| 统计落盘 | ❌ **只在内存，关掉就丢** |
+| **统计落盘**（真 SQLite，崩溃安全 WAL） | ✅ 重启不归零；强杀能被发现 |
+| 命令行报表 | ✅ `tools/keycount.py`（直读同一个库） |
 | 点击穿透 | ❌ 扩展里写好了，宠物还没调用 |
 | 真素材 / 动画 | ❌ 现在是个占位圆 |
 | 托盘图标 / 开机自启 / 中文字体 | ❌ 都没有 |
@@ -23,21 +24,29 @@
 ## 结构
 
 ```
-native/          平台核心，不依赖 Godot（钩子 + 键名归一化）
+native/          平台核心，不依赖 Godot
   kc_hook.h/.cpp   全局钩子：自己的线程 + 自己的消息循环
-  test_hook.cpp    独立验证工具（--selftest / 实机抓键）
+  kc_store.h/.cpp  计数存储：SQLite，按 (day,hour,key) 分桶
+  test_hook.cpp    钩子验证（--selftest / 实机抓键）
+  test_store.cpp   存储验证（39 条断言，不需要 Godot）
+  build_store.sh   编存储验证 exe
+thirdparty/
+  sqlite/          SQLite amalgamation 3.53.4 + 版本固定记录 PIN.txt
 gdext/           GDExtension 接线层
-  src/kc_gdext.h/.cpp   KeyCountHook / KeyCountWindow
-  SConstruct            构建脚本
+  src/kc_gdext.h/.cpp   KeyCountHook / KeyCountWindow / KeyCountStore
+  SConstruct            构建脚本（含 sqlite3.c）
   api/                  从本机 Godot dump 出来的 extension_api.json
+tools/
+  keycount.py      命令行报表（Python 自带 sqlite3，不需要编东西）
 pet/             Godot 工程
   project.godot         透明置顶 + no_focus + gl_compatibility
-  pet.gd                占位宠物 + 状态机
+  pet.gd                占位宠物 + 状态机 + 落盘口径（什么算一天/flush 频率）
   addons/keycount/      扩展的 .gdextension + 编好的 dll
 evidence/        验证工具（可重跑）
   run-pet.ps1           **启动器 —— 必须用它启动宠物**
   inject3.ps1           往自测窗口注入按键，验证全局抓键
   fg2.ps1               查「键盘到底在谁手上」（GetGUIThreadInfo）
+  drag-test.ps1         模拟真实拖拽
   screenshot.ps1/crop2.ps1  截图与裁剪
 spike-godot/     Godot 透明窗口实测工程（Vulkan 黑方块 vs OpenGL 正常的原始证据）
 SPEC.md          全部实测结论与踩坑记录
@@ -53,36 +62,54 @@ SPEC.md          全部实测结论与踩坑记录
 ## 构建
 
 ```bash
-# 1) godot-cpp：版本必须与 Godot 对齐
+# 1) godot-cpp：版本必须与 Godot 对齐（commit 见 gdext/GODOT_CPP_PIN.txt）
 cd gdext
 git clone --depth 1 https://github.com/godotengine/godot-cpp.git
 
-# 2) 编扩展
+# 2) 编扩展（sqlite3.c 也在这步一起编，首次会多花十几秒）
 scons platform=windows target=template_debug   api_version=4.7 -j12
 scons platform=windows target=template_release api_version=4.7 -j12
 cp bin/*.dll ../pet/addons/keycount/bin/
 
-# 3) （可选）平台核心的独立验证
+# 3) 平台核心的独立验证（都不需要 Godot）
 cd ../native
+./build_store.sh && ./test_store.exe      # 存储：39 条断言
+
 g++ -std=c++17 -O2 -Wall -Wextra -static -static-libgcc -static-libstdc++ \
     -o test_hook.exe kc_hook.cpp test_hook.cpp -luser32
-./test_hook.exe --selftest    # 25 条键名断言
+./test_hook.exe --selftest                # 键名：25 条断言
 ```
 
 ## 运行
 
 ```powershell
-# 先过一次导入，否则 GDExtension 不会被加载
+# 首次需过一遍导入，否则 GDExtension 不会被加载（之后 run-pet.ps1 会自动做）
 godot --headless --editor --quit --path pet
 
-# 必须用启动器 —— 它会记录「宠物出现之前谁持有键盘」，传给宠物用来把焦点还回去
+# 启动（必须用启动器 —— 它会记录「宠物出现之前谁持有键盘」，传给宠物用来把焦点还回去）
 powershell -File evidence/run-pet.ps1
+
+# 看数据（宠物没在跑也能看；直读同一个 SQLite 库）
+uv run --no-project python tools/keycount.py today
+uv run --no-project python tools/keycount.py week
+uv run --no-project python tools/keycount.py runs    # 能看出有没有没正常结束的运行
 ```
+
+库在 `%APPDATA%\Godot\app_userdata\keycount pet\keycount.db`（Godot 的 `user://`）。
 
 **为什么不能直接双击跑**：Godot 在 GDExtension 初始化**之前**就创建并激活了主窗口，
 所以在扩展内部永远看不到「原来谁持有键盘」。只有启动器能在拉起宠物前那一瞬记下它。
 少了这一步，宠物启动后会攥着 `hwndFocus`，你随手打的字会落进宠物里。
 详见 `SPEC.md` 的「抢焦点这件事打了三仗」。
+
+## 第三方依赖：两处刻意不同的处理
+
+| 依赖 | 进仓库？ | 理由 |
+|---|---|---|
+| `godot-cpp` | ❌ 不进，只记 commit 在 `gdext/GODOT_CPP_PIN.txt` | 35MB 的仓库、自带构建系统，且**必须与 Godot 版本对齐**；进仓库只会让它慢慢漂移 |
+| `thirdparty/sqlite/` | ✅ 进 | amalgamation 就三个文件、无构建系统依赖，编进去就完事；不进仓库反而让“换台机器就能编”这个前提消失 |
+
+两处不一致是有意的，不是遗漏。
 
 ## 两条容易踩的坑
 
