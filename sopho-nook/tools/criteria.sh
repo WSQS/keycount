@@ -469,6 +469,45 @@ case "$out" in
   *) no "clangd LSP 判据失败（rc=$rc）：$out" ;;
 esac
 
+# ---------- ㉖ zonecheck（区域标记的只读检查器） ----------
+echo "########## ㉖ zonecheck：单测 + 仓库 check + CLI judge（ai 碰 human 必须 deny）"
+if command -v uv >/dev/null 2>&1; then
+  out=$(timeout 180 uv run --no-project python tools/zonecheck/test_zonecheck.py 2>&1); rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '^OK$'; then
+    ok "单测全过（$(printf '%s' "$out" | grep -oE 'Ran [0-9]+ tests' | head -1)）"
+  else
+    no "zonecheck 单测失败（rc=$rc）"; printf '%s\n' "$out" | tail -8 | sed 's/^/     /'
+  fi
+  # 仓库级：check 必须 0 错，且 covered 文件数 > 0
+  # （防“整仓库被 exclude 掉 ⇒ judge 一律 allow”这个老坑——参考项目真踩过）
+  files=$(timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py stats 2>/dev/null | grep -oE '[0-9]+ 文件' | grep -oE '^[0-9]+' | head -1)
+  timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py check >/dev/null 2>&1; crc=$?
+  if [ "$crc" -eq 0 ] && [ "${files:-0}" -gt 0 ]; then
+    ok "仓库 check 0 错，且 covered 文件数 = $files（>0，没被 exclude 掏空）"
+  else
+    no "仓库 check 退出码=$crc，covered 文件数=${files:-?}"
+  fi
+  # CLI 级 judge（P3 门将来走的就是这条）：ai 碰 human 必须 deny + 退出码 1
+  to_native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+  zc="$nook/.nvim/xdg/zc_tmp"; rm -rf "$zc"; mkdir -p "$zc"
+  cat > "$zc/.zonecheck.json" <<'JSON'
+{"schema":1,"prefixByExt":{".py":"#"},"defaultPrefix":"//","include":["**/*.py"],"exclude":[],"generated":[],
+ "defaultZone":"legacy","defaultZoneByFile":{},
+ "policy":{"crossZone":"error","humanTouch":"error","markerEdit":"error","unmarkedTouch":"warn"}}
+JSON
+  printf '# >>> zone:human\nx = 1\n# <<<\ny = 2\n' > "$zc/a.py"
+  printf '# >>> zone:human\nx = 2\n# <<<\ny = 2\n' > "$zc/proposed.py"
+  out=$(timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py --root "$(to_native "$zc")" judge \
+        --path a.py --new "$(to_native "$zc/proposed.py")" --actor ai --policy --json 2>&1); rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q '"decision": "deny"'; then
+    ok "CLI judge：actor=ai 碰 human 区 → deny（rc=1）"
+  else
+    no "CLI judge 没拒（rc=$rc）：$out"
+  fi
+else
+  sk "没有 uv，跳 zonecheck 判据"
+fi
+
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
 [ "$failed" -eq 0 ]

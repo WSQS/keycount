@@ -38,6 +38,8 @@ gdext/           GDExtension 接线层
   api/                  从本机 Godot dump 出来的 extension_api.json
 tools/
   keycount.py      命令行报表（Python 自带 sqlite3，不需要编东西）
+  zonecheck/       区域标记（human / ai）的只读检查器（stdlib，uv run --no-project python）
+.zonecheck.json   区域标记的配置（include/exclude/defaultZone/policy）
 pet/             Godot 工程
   project.godot         透明置顶 + no_focus + gl_compatibility
   pet.gd                占位宠物 + 状态机 + 落盘口径（什么算一天/flush 频率）

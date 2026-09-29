@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "prefixByExt": {
+    ".py": "#",
+    ".sh": "#",
+    ".gd": "#",
+    ".lua": "--",
+    ".toml": "#",
+    ".yaml": "#"
+  },
+  "defaultPrefix": "//",
+  "include": [
+    "**/*.c",
+    "**/*.cc",
+    "**/*.cpp",
+    "**/*.cxx",
+    "**/*.h",
+    "**/*.hpp",
+    "**/*.hxx",
+    "**/*.py",
+    "**/*.gd",
+    "**/*.lua",
+    "**/*.sh"
+  ],
+  "exclude": [
+    ".git/**",
+    "gdext/godot-cpp/**",
+    "gdext/bin/**",
+    "gdext/.cache/**",
+    "thirdparty/**",
+    "agent-test/**",
+    "pet/addons/**",
+    "sopho-nook/.agent/**",
+    "sopho-nook/.nvim/**"
+  ],
+  "generated": [
+    "gdext/api/**",
+    "**/*.import"
+  ],
+  "defaultZone": "legacy",
+  "defaultZoneByFile": {},
+  "policy": {
+    "crossZone": "error",
+    "humanTouch": "error",
+    "markerEdit": "error",
+    "unmarkedTouch": "warn"
+  }
+}
