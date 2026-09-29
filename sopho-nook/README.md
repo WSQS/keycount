@@ -58,6 +58,7 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | 17 | **C/C++ 的 LSP（clangd，零插件）**：补全 / 跳转定义 / hover，用 nvim 内建 LSP 客户端 | 判据 ㉕（纯函数候选解析 + **真起一个 clangd client**，确认 completion/definition 能力） | 已验（headless 起 client）；真终端按键见“已知未验” |
 | 18 | **区域标记（human / ai）P1：只读检查器**：`.zonecheck.json` + `tools/zonecheck/`（仓库根）。标记成对、纯栈配对、可嵌套；`check` / `stats` / `judge` | 判据 ㉖（17 条单测 + 仓库 `check` 0 错且 covered>0 + **CLI `judge`：actor=ai 碰 human → deny/rc=1**） | P1 已验；P2（nvim 上色）/P3（门）见下 |
 | 19 | **区域在编辑器里可见（P2）**：`:KcZoneStatus` / `:KcZoneCheck` / `:KcZoneJudge` / `:KcZoneRefresh` / `:KcZoneToggleLegacy`；区域上色 + sign + 行尾虚文本 | 判据 ㉗（`plan()` 的行映射/空区域/嵌套 + 真跑 `check`/`judge`/`refresh`） | 已验（headless）；真终端观感见“已知未验” |
+| 20 | **C/C++ 保存时格式化**：`clang-format`（仓库根 `.clang-format`），`BufWritePre` 触发；`:KcFormat` 手动 | 判据 ㉘（候选解析 + 真跑 `:w` 格式化 + **标记不被弄坏**） | 已验；代价见“已知未验” |
 
 ## 这个项目在这个 nook 里加了什么
 
@@ -76,6 +77,7 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | `nvim/lua/kc/watch.lua` | 外部改动自动重载：`uv_fs_event` 盯「已打开文件所在目录」→ 去抖 150ms → 纯函数 `decide()` 判决（干净=读盘；**脏缓冲=只警告不覆盖**；文件没了=保留缓冲）。状态放 `_G`，所以 `<leader>r` 之后 watch 逻辑也是新的 |
 | `nvim/lua/kc/lsp.lua` | C/C++ 的 LSP：解析 clangd（PATH → VS 2022 → LLVM，且**实跑 `--version` 自检**才采用 —— VS 里 x64 与 ARM64 并存，ARM64 那份在 x64 上起不来）、`vim.lsp.config/enable` 零插件启动；编译参数走 `gdext/compile_commands.json` |
 | `nvim/lua/kc/zone.lua` | 区域标记在编辑器里**可见**（软事：只上色/只提示，**从不拦人**）。`covered` 由检查器回答，自己不维护扩展名清单。纯函数 `plan()` 管“内容行 → extmark 行”的映射（判据 ㉗） |
+| `nvim/lua/kc/format.lua` + **`.clang-format`（仓库根）** | C/C++ 保存时格式化（`BufWritePre`）。风格来自仓库根 `.clang-format`（**反推自现有代码**）。不用 clangd 的 formatting：`BufWritePre` 时 clangd 可能还没挂上。撞 VS 的 ARM64 `clang-format` 会在 spawn 时抛错 → 已 x64 优先 + 实跑自检 + **pcall**（格式化失败绝不阻断保存） |
 | **`tools/zonecheck/`（仓库根，不是本 nook）** | 区域标记（human/ai）的只读检查器（stdlib Python，`uv run --no-project python`）。P1：标记解析 + `check`/`stats`/`judge`。目标 = **目的 A（保护）**：人标的 human 区，agent 机械地改不了（机制见判据 ㉖）。P2（nvim 上色）/P3（pi 门 + `pi-zoned`）待做 |
 | `agents/ROLE.md` | **角色说明**（政策，进 git）。由 `bin/pi-local` 用 `--append-system-prompt` 指到它 |
 | `agents/skills/keycount-verification/` | 改完东西后**怎么按层验证**（核心自检 → 扩展编译 → 集成 → 不抢焦点 → 落盘 → 单实例） |
@@ -115,6 +117,7 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
 # 区域标记检查（仓库根，只读）：
 #   uv run --no-project python tools/zonecheck/zonecheck.py check
 #   :KcZoneStatus / :KcZoneCheck / :KcZoneJudge / :KcZoneRefresh / :KcZoneToggleLegacy
+#   :KcFormat     手动格式化当前 C/C++ 文件（保存时也会自动做）
 #   :KcInfo     打印推导出来的路径（调试 nook 自己用）
 ```
 
@@ -135,6 +138,11 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
 - **`zone.lua` 的上色没人真看过**：判据 ㉗ 验的是 `plan()` 的行映射与真跑 check/judge/refresh，
   但**真终端里那几块底色 / sign / 行尾虚文本长什么样，没人看过**（与浮窗同类）。
   且 `:KcZoneCheck` 查的是**磁盘上已保存的版本**（`BufWritePost`），不是“保存前将要写的内容”。
+- **C/C++ 保存时格式化会改内容**：`clang-format`（仓库根 `.clang-format`）在 `BufWritePre` 跑。
+  已验：坏格式能被改对、标记不被弄坏、失败不阻断保存。**代价**：首次套用改过 6 个文件里的 ~73 行
+  （**纯空白**）；续行风格与旧手写不同（旧的是“对齐括号再取 tab 停位”，clang-format 复现不了，
+  见 `.clang-format` 里的注释）。且格式化**可能重排 human 区的空白** —— 那是人自己保存触发的工具行为，
+  不是“agent 碰了 human”。
 - **subagent 已验到“单发端到端”**：判据 ㉔ 验注册；另外实跑过一次（父进程只开 `subagent`，让它派 scout 去数 `native/*.cpp`）。
   **没验的**：并行（`tasks=[...]`）与链式（`chain=[...]`）两种模式；以及示例 agent 的 prompt 质量（那是上游的，没改）。
   复跑：`sopho-nook/bin/pi-local --no-session --no-context-files --tools subagent --print '用 subagent 派 agent="scout" 数 native/ 下的 .cpp 文件'`

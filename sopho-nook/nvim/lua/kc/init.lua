@@ -76,6 +76,9 @@ function M.setup(_opts)
   -- 区域标记（human/ai）在编辑器里可见（软事：只显示、只提示，从不拦人）。
   require("kc.zone").setup()
 
+  -- C/C++ 保存时格式化（clang-format）。找不到就出声一次，不假装格式化过。
+  require("kc.format").setup()
+
   vim.api.nvim_create_user_command("KcPick", function() M.pick() end,
     { desc = "kc: 挑一个文件编辑" })
   vim.api.nvim_create_user_command("KcHelp", function() require("kc.help").show() end,

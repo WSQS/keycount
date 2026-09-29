@@ -546,6 +546,40 @@ case "$out" in
   *) no "zone P2 判据失败（rc=$rc）：$out" ;;
 esac
 
+# ---------- ㉘ C/C++ 保存时格式化（clang-format） ----------
+echo "########## ㉘ format：候选解析 + 真跑保存时格式化 + 标记不被弄坏"
+to_native_fmt() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+fz="$nook/.nvim/xdg/fmt_zone"; rm -rf "$fz"; mkdir -p "$fz"
+cat > "$fz/.zonecheck.json" <<'JSON'
+{"schema":1,"prefixByExt":{},"defaultPrefix":"//","include":["**/*.cpp"],"exclude":[],"generated":[],"defaultZone":"legacy","defaultZoneByFile":{},"policy":{"crossZone":"error","humanTouch":"error","markerEdit":"error","unmarkedTouch":"warn"}}
+JSON
+cat > "$nook/.nvim/xdg/fmt_check.lua" <<'LUA'
+local f = require("kc.format")
+local bad = 0
+local function eq(a, b, m) if a ~= b then bad = bad + 1; io.write(" BAD " .. m .. " got=" .. tostring(a) .. " want=" .. tostring(b) .. "\n") end end
+eq(f.pick({ "definitely_not_here" }, function() return false end), nil, "pick-none")
+eq(f.pick({ "definitely_not_here", "clang-format" }, function(p) return p == "clang-format" end), "clang-format", "pick-second")
+eq(f.clang_format() ~= nil, true, "resolved")
+local z = vim.fn.getcwd() .. "/sopho-nook/.nvim/xdg/fmt_zone/z.cpp"
+vim.fn.writefile({ "// >>> zone:human", "int  f(int x){if(x){return  x;}", "// <<<" }, z)
+vim.cmd("edit " .. vim.fn.fnameescape(z))
+eq(vim.bo.filetype, "cpp", "filetype")
+vim.cmd("write")
+local disk = table.concat(vim.fn.readfile(z), "\n")
+eq(disk:find("int f(int x) {", 1, true) ~= nil, true, "save-formatted")
+eq(disk:find("// >>> zone:human", 1, true) ~= nil, true, "marker-begin-kept")
+eq(disk:find("// <<<", 1, true) ~= nil, true, "marker-end-kept")
+eq(f.format_buf(vim.api.nvim_get_current_buf()), false, "format-idempotent")
+io.write("bad=" .. bad .. "\n")
+LUA
+out=$(timeout 180 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/fmt_check.lua" +qa! 2>&1); rc=$?
+case "$out" in
+  *"bad=0"*) ok "候选解析 + 真跑保存时格式化 + 标记仍在" ;;
+  *) no "format 判据失败（rc=$rc）：$out" ;;
+esac
+timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py --root "$(to_native_fmt "$fz")" check >/dev/null 2>&1
+if [ "$?" -eq 0 ]; then ok "格式化后 zonecheck 仍 0 错（标记没被弄坏）"; else no "格式化后 zonecheck 报错"; fi
+
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
 [ "$failed" -eq 0 ]
