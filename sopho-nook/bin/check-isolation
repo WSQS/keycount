@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# 判据：跑一条命令，并证明它没有写进"工程外"的任何地方。按当前平台选择快照集。
+#
+#   bin/check-isolation -- bin/nvim-local --headless +q
+#   bin/check-isolation -- bin/pi-local --version
+set -euo pipefail
+
+if [ "${1:-}" != "--" ] || [ "$#" -lt 2 ]; then
+  echo "用法: bin/check-isolation -- <命令> [参数...]" >&2
+  exit 2
+fi
+shift
+
+# 取景框：本脚本住在 <nook>/bin/ 里，所以能自己推算出 nook 与其父目录
+nook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+parent_dir="$(dirname "$nook_dir")"
+nook_base="$(basename "$nook_dir")"
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) plat=windows ;;
+  *)                    plat=unix ;;
+esac
+
+if [ "$plat" = unix ]; then
+  case "$1" in
+    *.cmd|*.CMD)
+      echo "check-isolation: 被测命令是 Windows 的 .cmd，但当前判定为 unix 平台（你在 WSL/MSYS 里？）。" >&2
+      echo "                 Windows 侧判据请用 Git Bash 跑：\"C:\\Program Files\\Git\\bin\\bash.exe\"" >&2
+      exit 2 ;;
+  esac
+fi
+
+targets=(); prune=()
+if [ "$plat" = unix ]; then
+  prune=( -path "$HOME/.npm/_logs" -o -path "$HOME/.npm/_logs/*" )
+  targets=(
+    "$HOME/.pi/agent"
+    "$HOME/.config/nvim"
+    "$HOME/.local/share/nvim"
+    "$HOME/.local/state/nvim"
+    "$HOME/.cache/nvim"
+    "$HOME/.local/share/pi"
+    "$HOME/.config/pi"
+    "$HOME/.local/state/pi"
+    "$HOME/.cache/pi"
+    "$HOME/.npm"
+    "$HOME/.bun"
+    "${TMPDIR:-/tmp}/nvim.user"
+  )
+  # 故意**不**包含 ~/.pi/profiles/**：那是跑在本机 harness 里的会话自己持续在写的目录。
+else
+  # Git Bash 的 $LOCALAPPDATA 等是 "C:\Users\..." 形式：find -path 的模式走 fnmatch，
+  # 反斜杠在那儿是转义符 ⇒ 剪枝会静默失效（实测 _logs 一条都排除不掉）。用 cygpath 归一化。
+  up() { if command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi; }
+  L="$(up "${LOCALAPPDATA:-$HOME/AppData/Local}")"
+  R="$(up "${APPDATA:-$HOME/AppData/Roaming}")"
+  U="$(up "${USERPROFILE:-$HOME}")"
+  T="$(up "${TEMP:-${TMP:-/tmp}}")"
+  # 注意：windows 分支的快照用了 -mindepth/-maxdepth 分两趟，而 -prune 与它们并存时不可靠，
+  # 所以 npm 日志的排除放在 snapshot() 的输出端做（见那里），这里不留"看起来在生效"的死变量。
+  targets=(
+    "$U/.pi/agent"
+    "$L/nvim"
+    "$L/nvim-data"
+    "$R/nvim"
+    "$L/npm-cache"
+    "$R/npm"
+    "$T/nvim"          # Windows 上 nvim 默认 cache 目录
+    "$T/nvim.0"        # 默认 run 目录（uid 0）
+    "$T/nvim.user"     # 这是个 no-op，留着只为说明"这不是 Windows 的落点"
+  )
+fi
+
+snapshot() {
+  for d in "${targets[@]}"; do
+    [ -e "$d" ] || { echo "MISSING $d"; continue; }
+    if [ "$plat" = windows ]; then
+      # Windows 侧 %APPDATA%\npm 有 17 万项，逐项 stat 要 5 分钟。
+      # 折中：4 层以下只比"名字集合"（抓新增/删除/改名），近处（≤3 层）才比 size+mtime。
+      # 代价：深层文件的"原地修改"抓不到 —— 写在这里，别当没有。
+      # grep -v 在「输入为空 / 全被排除」时会返回 1；配合 set -euo pipefail 会让
+      # 整个判据在拍 before 快照时静默退出，连 PASS/FAIL 都来不及打印。
+      # 空集合是合法快照，不是错误，所以显式吞掉这个状态码。
+      { find "$d" -mindepth 4 -printf '%p\n' 2>/dev/null | grep -v '/npm-cache/_logs/' | sort; } || true
+      { find "$d" -maxdepth 3 -printf '%p|%s|%T@\n' 2>/dev/null | grep -v '/npm-cache/_logs' | sort; } || true
+    else
+      # npm 自己的日志目录是共用的、且谁跑 npm 谁写 —— 排除它，否则判据变成噪声。
+      find "$d" -mindepth 0 \( "${prune[@]}" \) -prune -o \
+        -printf '%p|%s|%T@\n' 2>/dev/null | sort
+    fi
+  done
+  # 取景框：<nook> 旁边不得出现/改动"同前缀的兄弟项"（如 sopho-nook.nvim\、sopho-nook.agent\）。
+  # Windows 上"少一个反斜杠"就是这个形状 —— 只盯用户目录是抓不到的。
+  # 模式收紧成 "<nook>.xxx"：逃逸的形状正是 sopho-nook.nvim\ / sopho-nook.agent\；
+  # 用 "$nook_base*" 会顺带匹配 nook-fix、nook-new 这类无关兄弟项（实测 4 条里 3 条无关）。
+  find "$parent_dir" -maxdepth 1 -name "$nook_base.*" \
+    -printf '%p|%s|%T@\n' 2>/dev/null | sort
+}
+
+before="$(mktemp)"; after="$(mktemp)"
+trap 'rm -f "$before" "$after"' EXIT
+snapshot > "$before"
+
+set +e
+"$@"; rc=$?
+set -e
+
+snapshot > "$after"
+
+echo "--- check-isolation[$plat]: 被测命令退出码 $rc"
+if diff -u "$before" "$after" > /tmp/check-isolation.diff; then
+  echo "--- check-isolation[$plat]: PASS（工程外无任何新增/修改/删除）"
+  exit "$rc"
+else
+  echo "--- check-isolation[$plat]: FAIL（下面的差异就是「漏出去」的东西）" >&2
+  cat /tmp/check-isolation.diff >&2
+  exit 1
+fi

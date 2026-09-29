@@ -1,0 +1,9 @@
+# 跨平台行尾：脚本必须 LF（WSL/Linux 的 bash 遇 CRLF 会 bad interpreter），Windows 启动器必须 CRLF。
+# .gitattributes 优先于 core.autocrlf。本文件只作用于本目录内的文件。
+* text=auto
+bin/*   text eol=lf
+*.lua   text eol=lf
+*.json  text eol=lf
+# 交付实况就是 LF，而且实测 LF+ASCII 就能跑；真正的死规矩是"不许非 ASCII"（判据 ⑭ 盯它）。
+# 注意：.gitattributes **不支持行尾 # 注释**（写了会让整行作废，git 只在 stderr 上嘟囔一句）。
+*.cmd   text eol=lf

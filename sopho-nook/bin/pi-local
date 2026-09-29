@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# 工程内 pi：配置 / 会话 / 凭据 / 信任全部落在本 nook 目录的 .agent/ 里，不写全局 ~/.pi/agent。
+# "情况"（skills）也跟项目走：用 --skill 显式指到 sopho-nook/agents/skills（pi 文档 skills.md 有该参数），
+# 于是仓库**根目录不需要 .pi/ 也不需要 .agents/** —— 改动只落在一个文件夹里。
+set -euo pipefail
+
+nook="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# 注意：**强制**指向工程内。宿主 harness 会预先设置 PI_CODING_AGENT_DIR，
+# 若用 ${PI_CODING_AGENT_DIR:-默认} 就会继承它、真的写进全局。要换目录只能用 PI_LOCAL_AGENT_DIR。
+export PI_CODING_AGENT_DIR="${PI_LOCAL_AGENT_DIR:-$nook/.agent}"
+export PI_OFFLINE="${PI_OFFLINE:-1}"
+export PI_SKIP_VERSION_CHECK=1
+mkdir -p "$PI_CODING_AGENT_DIR"
+
+# pi 的 find 工具依赖 fd/fdfind。PI_OFFLINE=1 时 pi 不能自行下载，所以这里如实提示。
+if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
+  echo "pi-local: 提示 —— 系统里没有 fd/fdfind，pi 的 find 工具会失败（PI_OFFLINE=1 时它不能自行下载）。" >&2
+fi
+
+if [ ! -d "$nook/agents/skills" ]; then
+  # pi 对"不存在的 --skill 目录"是静默忽略（实测 success=true、stderr 0B），所以这里出声。
+  echo "pi-local: 提示 —— 技能目录不存在：$nook/agents/skills（--skill 会被 pi 静默忽略）" >&2
+fi
+
+extra=()
+[ -d "$nook/agents/skills" ] && extra+=(--skill "$nook/agents/skills")
+
+# 角色说明（政策，进 git）。pi 的 --append-system-prompt 吃"文本或文件"：
+# 值是**存在的文件**就读它的内容当文本、否则当字面字符串（pi 的 resolvePromptInput
+# 就是这么判的），所以这里可以直接指路径，不必把内容拼进命令行。
+if [ -f "$nook/agents/ROLE.md" ]; then
+  extra+=(--append-system-prompt "$nook/agents/ROLE.md")
+else
+  echo "pi-local: 提示 —— 角色说明不存在：$nook/agents/ROLE.md（这一节不会生效）" >&2
+fi
+
+exec pi "${extra[@]}" "$@"

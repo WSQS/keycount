@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# 工程内 nvim：init 与全部 XDG 目录都在本 nook 目录里，不碰 ~/.config/nvim 等全局位置。
+#
+# 跨平台依据（nvim 文档 base-directories / xdg）：$XDG_* "are used if defined" ——
+# Windows 的默认值才是 ~/AppData/Local，定义了就以它为准 ⇒ 同一套变量，写法不同而已。
+set -euo pipefail
+
+nook="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+xdg="${NVIM_LOCAL_XDG:-$nook/.nvim/xdg}"
+for k in config data state cache run; do mkdir -p "$xdg/$k"; done
+
+export XDG_CONFIG_HOME="$xdg/config"
+export XDG_DATA_HOME="$xdg/data"
+export XDG_STATE_HOME="$xdg/state"
+export XDG_CACHE_HOME="$xdg/cache"
+# 少这一条，run/socket 会落到 /tmp/nvim.user（未设时就是这样）
+export XDG_RUNTIME_DIR="$xdg/run"
+
+exec nvim -u "$nook/nvim/init.lua" "$@"

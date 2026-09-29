@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 进"挑一个文件"列表（无参数）—— 这就是「nook 进去」的入口。
+# 列表里输入筛选、↑↓ 选、<CR> 打开、<Esc> 取消。
+# 进去之后所有事都在 nvim 里做：开文件（<leader>f）、跑验证（<leader>t）、
+# 开 pi（<leader>a）、lazygit（<leader>g）、看快捷键（<leader>?）。
+#
+# 隔离靠 nvim-local 那一套（五个 XDG 全在 nook 内），这里只是换个启动方式。
+set -euo pipefail
+if [ "$#" -ne 0 ]; then
+  echo "用法: nook          （不带参数：进选择列表）" >&2
+  echo "     要直接打开某个文件请用 bin/nvim-local <文件>" >&2
+  exit 2
+fi
+nook="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$nook/bin/nvim-local" -c 'lua require("kc").pick()'

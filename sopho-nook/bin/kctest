@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# keycount 的验证入口：把本项目**真正的**那些命令按顺序跑一遍（终端侧）。
+#
+#   用法：sopho-nook/bin/kctest            （只跑，不改任何东西）
+#         sopho-nook/bin/kctest --build    （缺的自检 exe 顺手编一下）
+#
+# 与 nvim 里的 <leader>t 菜单是**同一份清单**（两边都要改，tools/criteria.sh 有判据盯这条）。
+# 原则：证不了就如实 SKIP 并说明原因，不假装通过。
+set -uo pipefail   # 故意不用 -e：单条失败应记为 FAIL，而不是中断整轮
+
+nook="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo="$(dirname "$nook")"
+do_build=0
+[ "${1:-}" = "--build" ] && do_build=1
+
+pass=0; failed=0; skip=0
+ok() { echo "  PASS  $*"; pass=$((pass+1)); }
+no() { echo "  FAIL  $*"; failed=$((failed+1)); }
+sk() { echo "  SKIP  $*"; skip=$((skip+1)); }
+
+# ---------- 1. 核心自检：存储 ----------
+echo "########## 存储自检（native/test_store，不需要 Godot）"
+if [ ! -x "$repo/native/test_store.exe" ] && [ ! -x "$repo/native/test_store" ]; then
+  if [ "$do_build" = 1 ]; then
+    echo "  （缺少 test_store，先编）"
+    "$repo/native/build_store.sh" >/dev/null 2>&1
+  fi
+fi
+exe=""
+[ -x "$repo/native/test_store.exe" ] && exe="$repo/native/test_store.exe"
+[ -x "$repo/native/test_store" ] && exe="$repo/native/test_store"
+if [ -n "$exe" ]; then
+  out=$(cd "$repo/native" && "$exe" 2>&1)
+  case "$out" in
+    *"全部通过"*) ok "test_store 自检全过（$(printf '%s' "$out" | grep -c '^PASS') 条 PASS）" ;;
+    *) no "test_store 有失败"; printf '%s\n' "$out" | tail -8 | sed 's/^/     /' ;;
+  esac
+else
+  sk "test_store 不存在 —— 跑 bin/kctest --build 或 native/build_store.sh"
+fi
+
+# ---------- 2. 核心自检：键名 ----------
+echo "########## 键名自检（native/test_hook --selftest）"
+exe=""
+[ -x "$repo/native/test_hook.exe" ] && exe="$repo/native/test_hook.exe"
+[ -x "$repo/native/test_hook" ] && exe="$repo/native/test_hook"
+if [ -n "$exe" ]; then
+  out=$(cd "$repo/native" && "$exe" --selftest 2>&1)
+  case "$out" in
+    *"0 失败"*) ok "key_name 自检全过（$(printf '%s' "$out" | grep -c '^PASS') 条）" ;;
+    *) no "test_hook --selftest 有失败"; printf '%s\n' "$out" | tail -6 | sed 's/^/     /' ;;
+  esac
+else
+  sk "test_hook 不存在 —— 需要 MinGW g++（见 README 的构建一节）"
+fi
+
+# ---------- 3. 扩展编译 ----------
+echo "########## 扩展编译（scons template_debug）"
+if command -v scons >/dev/null 2>&1; then
+  out=$(cd "$repo/gdext" && scons platform=windows target=template_debug api_version=4.7 -j12 2>&1)
+  rc=$?
+  if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qE " error |Error [0-9]"; then
+    ok "scons 通过"
+  else
+    no "scons 失败（rc=$rc）"; printf '%s\n' "$out" | grep -E " error |Error [0-9]" | head -5 | sed 's/^/     /'
+  fi
+else
+  sk "scons 不在 PATH"
+fi
+
+# ---------- 4. 数据链路（宠物没跑也能查） ----------
+echo "########## 数据链路（tools/keycount.py 直读 SQLite 库）"
+if command -v uv >/dev/null 2>&1; then
+  out=$(cd "$repo" && uv run --no-project python tools/keycount.py today 2>&1)
+  rc=$?
+  case "$out" in
+    *"找不到库"*) sk "库还不存在（宠物至少成功跑过一次才会建库）" ;;
+    *"总计"*|*"没有数据"*) if [ "$rc" -eq 0 ]; then ok "命令行报表可读"; else no "报表退出码非 0（rc=$rc）"; fi ;;
+    *) no "报表输出不符合预期"; printf '%s\n' "$out" | tail -4 | sed 's/^/     /' ;;
+  esac
+else
+  sk "uv 不在 PATH"
+fi
+
+echo
+echo "########## kctest 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
+[ "$failed" -eq 0 ]
