@@ -17,9 +17,47 @@ ok() { echo "  PASS  $1"; pass=$((pass+1)); }
 no() { echo "  FAIL  $1"; failed=$((failed+1)); }
 sk() { echo "  SKIP  $1"; skip=$((skip+1)); }
 
+# 收集后台 job 的输出（含它自己的 ########## 头），并按行统计 PASS/FAIL/SKIP。
+# 背景子 shell 里的 ok/no 改不到主进程的计数器，所以只能从输出里数。
+_tally() {
+  local f
+  for f in "$@"; do
+    if [ ! -s "$f" ]; then echo "  FAIL  [job] 没有任何输出（崩了？）：$f"; failed=$((failed+1)); continue; fi
+    cat "$f"
+    pass=$((pass + $(grep -cE '^  PASS' "$f" || true)))
+    failed=$((failed + $(grep -cE '^  FAIL' "$f" || true)))
+    skip=$((skip + $(grep -cE '^  SKIP' "$f" || true)))
+  done
+}
+
 NVIM="$B/nvim-local"
 # 这个 nvim 的 -c 'lua ...' 需要把 lua 当参数传，用个短包装免得引号互相打架
-nv() { "$NVIM" --headless -c "$1" +q 2>&1; }
+# ⚠️ 必须 `-i NONE`（不写 ShaDa）：并发跑多个 headless nvim 时它们会抢同一个 ShaDa 文件，
+#    报 E137 (ShaDa file is not writable) / E136，并在 state/ 下留 main.shada.tmp.d。
+#    实测：13 个并发跑同一批断言时必现（串行时不出现）。
+nv() { "$NVIM" --headless -i NONE -c "$1" +q 2>&1; }
+
+# ---------- 并发预计算：一批「独立、无副作用」的 headless nvim 断言 ----------
+# 每个 nv 是**独立进程**，彼此不共享状态；串行跑这一堆 1s 级的启动纯是浪费。
+# 先并发丢出去（输出进文件），下面的 ①② 隔离检查同时跑；各节只读结果 ——
+# 节的编号 / 消息 / 判据体都不动。
+# 为什么可以并发而不会互相污染：⑤ 的两条探针（<leader>Z / <leader>Y）各跑一个会话，
+# ⑭ 拿到的也就是**干净**的键位表 —— 与它们以前各自 `nv` 一次时完全一致。
+_bat="$(mktemp -d)"
+bat() { nv "$2" > "$_bat/$1" 2>&1 & }
+bat 3  'lua for _,k in ipairs({"config","data","state","cache","run"}) do io.write(k.."="..vim.fn.stdpath(k).."\n") end'
+bat 4a 'lua local m=pcall(require,"kc"); local p=pcall(require,"kc.paths"); local f=pcall(require,"kc.float"); local r=pcall(require,"kc.run"); io.write("loaded="..tostring(m and p and f and r))'
+bat 4b 'lua local n=0; for _,m in ipairs(vim.api.nvim_get_keymap("n")) do if tostring(m.desc or ""):sub(1,3)=="kc:" then n=n+1 end end; io.write("kc_maps="..n)'
+bat 5a 'lua vim.keymap.set("n","<leader>Z",function() end,{desc="kc: 判据探针映射"}); local l=table.concat(require("kc.help").lines(),"\n"); io.write("probe="..tostring(l:find("判据探针映射")~=nil))'
+bat 5b 'lua vim.keymap.set("n","<leader>Y",function() end,{desc="没有前缀的映射"}); local l=table.concat(require("kc.help").lines(),"\n"); io.write("noprefix="..tostring(l:find("没有前缀的映射")~=nil))'
+bat 6  'lua io.write(require("kc").info_lines()[1].."\n"..require("kc").info_lines()[2].."\n")'
+bat 14 'lua local t={} for _,m in ipairs(vim.api.nvim_get_keymap("n")) do local d=tostring(m.desc or "") if d:sub(1,3)=="kc:" then t[#t+1]=m.lhs end end io.write(table.concat(t," "))'
+bat 15a 'lua local p=require("kc.picker"); local it=p.items(); local sorted=true; local seen={}; local dup=0; for i,x in ipairs(it) do if seen[x] then dup=dup+1 end; seen[x]=true; if i>1 and it[i-1]>x then sorted=false end end; io.write("count="..#it.." sorted="..tostring(sorted).." dup="..dup)'
+bat 15b 'lua local it=require("kc.picker").items(); io.write(table.concat(it,"\n"))'
+bat 16 'lua local p=require("kc.picker"); local n=0; local bad=0; local function t(rel,want) n=n+1; if p.keep(rel)~=want then bad=bad+1; io.write("  BAD "..rel.." -> "..tostring(p.keep(rel)).." (want "..tostring(want)..")\n") end end; t("native/kc_hook.cpp",true); t("SPEC.md",true); t("SConstruct",true); t(".gitignore",true); t("sopho-nook/bin/nook",true); t("pet/pet.gd",true); t("thirdparty/sqlite/sqlite3.c",false); t("gdext/godot-cpp/src/x.cpp",false); t("gdext/bin/keycount.dll",false); t("shots/crop-final.png",true==false); t("pet/addons/keycount/bin/x.dll",false); t("a/b/libfoo.a",false); t("a/b/archive.zip",false); io.write("cases="..n.." bad="..bad)'
+bat 17 'lua local it=require("kc.picker").items(); local bad={}; for _,x in ipairs(it) do if x:find("%.log$") or x:find("rebuild") or x:find("%.import$") or x:find("godot%-cpp") or x:find("thirdparty/sqlite") or x:find("%%.godot/") or x:find("run%.log") then bad[#bad+1]=x end end; io.write("junk="..#bad); for _,x in ipairs(bad) do io.write(" "..x) end'
+bat 18 'lua local p=require("kc.picker"); local it=p.items(); local a=#p.filter(it,""); local b=#p.filter(it,"kc_store"); local c=#p.filter(it,"zzzz"); io.write("all="..#it.." empty="..a.." hit="..b.." miss="..c)'
+bat 20 'lua local p=require("kc.picker"); local bad=0; local cases=0; local function hits(n) local t={} for i=1,n do t[i]="f"..i end return t end; local function t(n,sel,rows,off) cases=cases+1; local h=hits(n); local lines,s,o,hi=p.layout(h,"",sel,rows,off); if #lines>rows+1 then bad=bad+1 end; if n>0 then if hi<1 or hi>#lines-1 then bad=bad+1 end; if s<o+1 or s>o+rows then bad=bad+1 end; if lines[hi+1]~="  ▸ "..h[s] then bad=bad+1 end end; if o<0 then bad=bad+1 end end; t(80,80,19,0); t(80,20,19,0); t(80,19,19,0); t(80,1,19,0); t(80,1,19,60); t(80,60,19,10); t(5,3,19,0); t(0,1,19,0); t(3,2,1,99); io.write("cases="..cases.." bad="..bad)'
 
 # ---------- ① / ② 隔离（按命令裁 scope；并发跑） ----------
 # ① nvim 只盯 nvim 自己的 XDG/临时目录；② pi 只盯 ~/.pi/agent。
@@ -47,6 +85,8 @@ case "$out" in
 esac
 rm -f "$_iso1" "$_iso2"
 
+wait   # 等前面并发丢出去的那批 nvim 断言收尾（它们只写文件，不抢输出）
+
 # ---------- ③ 五个 stdpath ----------
 echo "########## ③ nvim 五个 stdpath 全在 sopho-nook/ 内"
 canon() {
@@ -54,7 +94,7 @@ canon() {
   else printf '%s' "$1"; fi
 }
 want=$(canon "$nook")
-paths=$(nv 'lua for _,k in ipairs({"config","data","state","cache","run"}) do io.write(k.."="..vim.fn.stdpath(k).."\n") end' || true)
+paths=$(cat "$_bat/3" || true)
 bad=0; seen=0
 while IFS= read -r line; do
   [ -n "$line" ] || continue
@@ -71,12 +111,12 @@ else no "$bad 条 stdpath 落在 nook 外"; fi
 
 # ---------- ④ 本 nook 的 init 与 lua 真被加载 ----------
 echo "########## ④ nook 自己的 init 与 nvim/lua/kc 真的被加载"
-out=$(nv 'lua local m=pcall(require,"kc"); local p=pcall(require,"kc.paths"); local f=pcall(require,"kc.float"); local r=pcall(require,"kc.run"); io.write("loaded="..tostring(m and p and f and r))')
+out=$(cat "$_bat/4a")
 case "$out" in
   *loaded=true*) ok "kc / kc.paths / kc.float / kc.run 四个模块都可 require" ;;
   *) no "模块加载失败：$out" ;;
 esac
-out=$(nv 'lua local n=0; for _,m in ipairs(vim.api.nvim_get_keymap("n")) do if tostring(m.desc or ""):sub(1,3)=="kc:" then n=n+1 end end; io.write("kc_maps="..n)')
+out=$(cat "$_bat/4b")
 case "$out" in
   *kc_maps=0*) no "没有任何 kc: 前缀的键位被注册" ;;
   *kc_maps=*) ok "注册了 $(printf '%s' "$out" | grep -o '[0-9]*$') 条 kc: 键位" ;;
@@ -85,12 +125,12 @@ esac
 
 # ---------- ⑤ 帮助页是现算的，不是硬编码清单 ----------
 echo "########## ⑤ 帮助页现算（临时加一条映射，它必须出现；去掉前缀就不许出现）"
-out=$(nv 'lua vim.keymap.set("n","<leader>Z",function() end,{desc="kc: 判据探针映射"}); local l=table.concat(require("kc.help").lines(),"\n"); io.write("probe="..tostring(l:find("判据探针映射")~=nil))')
+out=$(cat "$_bat/5a")
 case "$out" in
   *probe=true*) ok "临时注册的映射立刻出现在帮助页里（说明是现算的）" ;;
   *) no "帮助页没有反映新注册的映射：$out" ;;
 esac
-out=$(nv 'lua vim.keymap.set("n","<leader>Y",function() end,{desc="没有前缀的映射"}); local l=table.concat(require("kc.help").lines(),"\n"); io.write("noprefix="..tostring(l:find("没有前缀的映射")~=nil))')
+out=$(cat "$_bat/5b")
 case "$out" in
   *noprefix=false*) ok "没有 kc: 前缀的映射不会混进帮助页（对照成立）" ;;
   *) no "对照失败：没有前缀的映射也出现了" ;;
@@ -98,7 +138,7 @@ esac
 
 # ---------- ⑥ 路径推导 ----------
 echo "########## ⑥ 路径推导正确（:KcInfo 对上 shell 推出来的）"
-out=$(nv 'lua io.write(require("kc").info_lines()[1].."\n"..require("kc").info_lines()[2].."\n")')
+out=$(cat "$_bat/6")
 got_nook=$(printf '%s\n' "$out" | sed -n '1s/^nook *= *//p')
 got_repo=$(printf '%s\n' "$out" | sed -n '2s/^repo *= *//p')
 if [ "$(canon "$got_nook")" = "$want" ] && [ "$(canon "$got_repo")" = "$(canon "$repo")" ]; then
@@ -186,7 +226,7 @@ fi
 
 # ---------- ⑮ 候选集来自 git 且自洽 ----------
 echo "########## ⑮ 选择列表的候选集：非空、已排序、无重复，且是 git 清单的子集"
-out=$(nv 'lua local p=require("kc.picker"); local it=p.items(); local sorted=true; local seen={}; local dup=0; for i,x in ipairs(it) do if seen[x] then dup=dup+1 end; seen[x]=true; if i>1 and it[i-1]>x then sorted=false end end; io.write("count="..#it.." sorted="..tostring(sorted).." dup="..dup)')
+out=$(cat "$_bat/15a")
 count=$(printf '%s' "$out" | grep -o 'count=[0-9]*' | cut -d= -f2)
 case "$out" in
   *"sorted=true"*"dup=0"*) if [ "${count:-0}" -gt 10 ]; then ok "候选 $count 个，已排序、无重复"
@@ -195,13 +235,13 @@ case "$out" in
 esac
 # 子集性：候选里不许出现 git 清单里没有的路径（说明没自己造路径）
 gitls=$(git -C "$repo" ls-files --cached --others --exclude-standard | sort)
-outside=$(nv 'lua local it=require("kc.picker").items(); io.write(table.concat(it,"\n"))' | grep -v '^$' | sort | comm -23 - <(printf '%s\n' "$gitls") || true)
+outside=$(cat "$_bat/15b" | grep -v '^$' | sort | comm -23 - <(printf '%s\n' "$gitls") || true)
 if [ -z "$(printf '%s' "$outside" | tr -d '[:space:]')" ]; then ok "候选集是 git 清单的子集（'什么是真文件'交给 .gitignore 说话）"
 else no "候选里有 git 清单之外的路径：$(printf '%s' "$outside" | head -3)"; fi
 
 # ---------- ⑯ 排除规则的纯函数边界 ----------
 echo "########## ⑯ 排除规则 keep() 的边界（逐条断言）"
-out=$(nv 'lua local p=require("kc.picker"); local n=0; local bad=0; local function t(rel,want) n=n+1; if p.keep(rel)~=want then bad=bad+1; io.write("  BAD "..rel.." -> "..tostring(p.keep(rel)).." (want "..tostring(want)..")\n") end end; t("native/kc_hook.cpp",true); t("SPEC.md",true); t("SConstruct",true); t(".gitignore",true); t("sopho-nook/bin/nook",true); t("pet/pet.gd",true); t("thirdparty/sqlite/sqlite3.c",false); t("gdext/godot-cpp/src/x.cpp",false); t("gdext/bin/keycount.dll",false); t("shots/crop-final.png",true==false); t("pet/addons/keycount/bin/x.dll",false); t("a/b/libfoo.a",false); t("a/b/archive.zip",false); io.write("cases="..n.." bad="..bad)')
+out=$(cat "$_bat/16")
 case "$out" in
   *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'cases=[0-9]*') 条边界全过（含：无扩展名的 SConstruct 要留下、.dll/.a/.zip/.png 要排掉）" ;;
   *) no "排除规则有错：$out" ;;
@@ -209,7 +249,7 @@ esac
 
 # ---------- ⑰ 候选集里不许混进产物 ----------
 echo "########## ⑰ 候选集不含产物（这是把名单交给 .gitignore 的直接结果）"
-out=$(nv 'lua local it=require("kc.picker").items(); local bad={}; for _,x in ipairs(it) do if x:find("%.log$") or x:find("rebuild") or x:find("%.import$") or x:find("godot%-cpp") or x:find("thirdparty/sqlite") or x:find("%%.godot/") or x:find("run%.log") then bad[#bad+1]=x end end; io.write("junk="..#bad); for _,x in ipairs(bad) do io.write(" "..x) end')
+out=$(cat "$_bat/17")
 case "$out" in
   *"junk=0"*) ok "没有日志 / 编译产物 / 导入侧车 / vendored 源码混进候选" ;;
   *) no "候选里混进了产物：$out" ;;
@@ -217,7 +257,7 @@ esac
 
 # ---------- ⑱ 过滤是纯函数 ----------
 echo "########## ⑱ 过滤是纯函数（空查询 = 原样；有匹配；无匹配 = 0）"
-out=$(nv 'lua local p=require("kc.picker"); local it=p.items(); local a=#p.filter(it,""); local b=#p.filter(it,"kc_store"); local c=#p.filter(it,"zzzz"); io.write("all="..#it.." empty="..a.." hit="..b.." miss="..c)')
+out=$(cat "$_bat/18")
 case "$out" in
   *"hit=0"*) no "按 kc_store 过滤竟然 0 条：$out" ;;
   *"miss=0"*)
@@ -242,7 +282,7 @@ fi
 # ---------- ⑭ 帮助页的口径与 README 一致 ----------
 echo "########## ⑭ 帮助页列出的键位都能在 README 的交互节里找到"
 if [ -f "$nook/README.md" ]; then
-  out=$(nv 'lua local t={} for _,m in ipairs(vim.api.nvim_get_keymap("n")) do local d=tostring(m.desc or "") if d:sub(1,3)=="kc:" then t[#t+1]=m.lhs end end io.write(table.concat(t," "))')
+  out=$(cat "$_bat/14")
   missing=0
   for lhs in $out; do
     # leader 是空格，README 里写作 <leader>X
@@ -258,7 +298,7 @@ fi
 
 # ---------- ⑳ 列表跟着选中项滚（纯函数不变量） ----------
 echo "########## ⑳ layout()：选中项永远落在可见窗口内，高亮行就是它那一条"
-out=$(nv 'lua local p=require("kc.picker"); local bad=0; local cases=0; local function hits(n) local t={} for i=1,n do t[i]="f"..i end return t end; local function t(n,sel,rows,off) cases=cases+1; local h=hits(n); local lines,s,o,hi=p.layout(h,"",sel,rows,off); if #lines>rows+1 then bad=bad+1 end; if n>0 then if hi<1 or hi>#lines-1 then bad=bad+1 end; if s<o+1 or s>o+rows then bad=bad+1 end; if lines[hi+1]~="  ▸ "..h[s] then bad=bad+1 end end; if o<0 then bad=bad+1 end end; t(80,80,19,0); t(80,20,19,0); t(80,19,19,0); t(80,1,19,0); t(80,1,19,60); t(80,60,19,10); t(5,3,19,0); t(0,1,19,0); t(3,2,1,99); io.write("cases="..cases.." bad="..bad)')
+out=$(cat "$_bat/20")
 case "$out" in
   *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'cases=[0-9]*') 条不变量全过（含：off 超界会被收回、rows=1 也不越界）" ;;
   *) no "layout() 不变量有错：$out" ;;
@@ -296,7 +336,7 @@ local n3, l3 = snap("up30")
 local ok = (n2 <= h) and vis2 and (n3 <= h) and (l3 == 1)
 io.write(table.concat(out, " ") .. " win_h=" .. h .. " ok=" .. tostring(ok))
 LUA
-out=$(timeout 40 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/picker_scroll_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 40 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/picker_scroll_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"ok=true"*) ok "$out" ;;
   *) no "移动后高亮掉出窗口或超时（rc=$rc）：$out" ;;
@@ -352,7 +392,7 @@ vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Space>r", true, false, tr
 if package.loaded["kc"] == before4 then bad = bad + 1; io.write(" BAD <leader>r 没有触发重载\n") end
 io.write("lhs=" .. tostring(lhs_found) .. " maps=" .. n .. " bad=" .. bad)
 LUA
-out=$(timeout 40 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/reload_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 40 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/reload_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'maps=[0-9]* bad=0' | tail -1)（纯函数边界 + 真重载 + 失败路径都过）" ;;
   *) no "reload 判据失败（rc=$rc）：$out" ;;
@@ -400,12 +440,14 @@ eq(content(), "local-dirty", "dirty-kept")
 w.stop()
 io.write("bad=" .. bad)
 LUA
-out=$(timeout 60 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/watch_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 60 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/watch_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"bad=0"*) ok "纯函数 10 条 + 真 fs_event：干净重载、脏缓冲不覆盖" ;;
   *) no "watch 判据失败（rc=$rc）：$out" ;;
 esac
 
+_p24f="$(mktemp)"
+(
 # ---------- ㉔ subagent 工具（vendored 扩展 + 政策软链） ----------
 echo "########## ㉔ subagent：扩展真的注册了 subagent 工具；agents/prompts 能从 .agent 读到"
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
@@ -451,6 +493,7 @@ if grep -q 'pi/extensions/subagent' "$B/pi-local" && grep -qF 'pi\extensions\sub
 else
   no "启动器没有把 subagent 扩展接上"
 fi
+) >"$_p24f" 2>&1 &
 
 # ---------- ㉕ clangd LSP（零插件） ----------
 echo "########## ㉕ clangd：候选解析（可运行才算）+ 真起一个 client 并确认能力"
@@ -473,13 +516,15 @@ if cap.definitionProvider ~= true then bad = bad + 1; io.write(" BAD no-definiti
 if vim.fn.maparg("gd", "n") == "" then bad = bad + 1; io.write(" BAD no-gd-map\n") end
 io.write("clients=" .. #cls .. " bad=" .. bad)
 LUA
-out=$(timeout 120 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/lsp_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 120 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/lsp_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'clients=[0-9]* bad=0')（候选解析边界 + 真 clangd client 能力：补全/跳转）" ;;
   *"clangd=nil"*) sk "没找到可运行的 clangd（跳过 LSP 集成）" ;;
   *) no "clangd LSP 判据失败（rc=$rc）：$out" ;;
 esac
 
+_p26f="$(mktemp)"
+(
 # ---------- ㉖ zonecheck（区域标记的只读检查器） ----------
 echo "########## ㉖ zonecheck：单测 + 仓库 check + CLI judge（ai 碰 human 必须 deny）"
 if command -v uv >/dev/null 2>&1; then
@@ -518,6 +563,7 @@ JSON
 else
   sk "没有 uv，跳 zonecheck 判据"
 fi
+) >"$_p26f" 2>&1 &
 
 # ---------- ㉗ 区域标记在编辑器里可见（P2） ----------
 echo "########## ㉗ zone P2：plan() 行映射/空区域/嵌套 + 真跑 check/judge/refresh"
@@ -551,7 +597,7 @@ eq((cn.human or 0) + (cn.ai or 0), 0, "no-human-ai")
 eq(vim.b[buf].kc_zone_marks >= 1, true, "legacy-block-drawn")
 io.write("bad=" .. bad .. "\n")
 LUA
-out=$(timeout 180 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/zone_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 180 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/zone_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"bad=0"*) ok "plan() 映射/空区域/嵌套 + check(0 错) + judge(零改动 allow) + refresh 都过" ;;
   *) no "zone P2 判据失败（rc=$rc）：$out" ;;
@@ -583,13 +629,18 @@ eq(disk:find("// <<<", 1, true) ~= nil, true, "marker-end-kept")
 eq(f.format_buf(vim.api.nvim_get_current_buf()), false, "format-idempotent")
 io.write("bad=" .. bad .. "\n")
 LUA
-out=$(timeout 180 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/fmt_check.lua" +qa! 2>&1); rc=$?
+out=$(timeout 180 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/fmt_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
   *"bad=0"*) ok "候选解析 + 真跑保存时格式化 + 标记仍在" ;;
   *) no "format 判据失败（rc=$rc）：$out" ;;
 esac
 timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py --root "$(to_native_fmt "$fz")" check >/dev/null 2>&1
 if [ "$?" -eq 0 ]; then ok "格式化后 zonecheck 仍 0 错（标记没被弄坏）"; else no "格式化后 zonecheck 报错"; fi
+
+# 收尾：等上面两个后台 job，并按声明顺序打印 + 统计
+wait
+_tally "$_p24f" "$_p26f"
+rm -f "$_p24f" "$_p26f"
 
 # ---------- ㉙ check-isolation 的 --scope 真的在裁范围 ----------
 echo "########## ㉙ check-isolation --scope：目标集确实不同（nvim 不扫 npm，pi 不扫 nvim）"
@@ -610,6 +661,8 @@ elif ! printf '%s' "$_all" | grep -q npm; then
 else
   ok "scope=nvim 不扫 npm / scope=pi 不扫 nvim / all 含两者；非法 scope 退 2"
 fi
+
+rm -rf "$_bat"
 
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
