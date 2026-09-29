@@ -332,7 +332,7 @@ bool KeyCountStore::commit(const Array &rows) {
 		r.delta = d.has("delta") ? static_cast<int64_t>(d["delta"]) : 1;
 		if (r.day.empty() || r.key.empty() || r.hour < 0 || r.hour > 23) {
 			store_.note_error(to_std(String("commit 第 ") + String::num(i) +
-					" 行字段不合法（day/key 为空，或 hour 不在 0..23）"));
+						 " 行字段不合法（day/key 为空，或 hour 不在 0..23）"));
 			return false;
 		}
 		out.push_back(std::move(r));

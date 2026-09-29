@@ -35,8 +35,8 @@ bool Store::prepare(const char *sql, sqlite3_stmt **stmt_out) {
 bool Store::open(const std::string &path) {
 	close();
 	if (sqlite3_open_v2(path.c_str(), &db_,
-				SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
-				nullptr) != SQLITE_OK) {
+			    SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+			    nullptr) != SQLITE_OK) {
 		last_error_ = (db_ != nullptr) ? sqlite3_errmsg(db_) : "sqlite3_open_v2 失败";
 		if (db_ != nullptr) {
 			sqlite3_close(db_);
@@ -58,23 +58,23 @@ bool Store::open(const std::string &path) {
 		return false;
 	}
 	if (!exec(
-				"CREATE TABLE IF NOT EXISTS key_hourly ("
-				"  day   TEXT    NOT NULL,"   // 'YYYY-MM-DD' 本地时区
-				"  hour  INTEGER NOT NULL,"   // 0..23 本地时区
-				"  key   TEXT    NOT NULL,"   // 归一化键名，见 kc_hook.cpp
-				"  count INTEGER NOT NULL,"
-				"  PRIMARY KEY (day, hour, key)"
-				") WITHOUT ROWID;")) {
+			    "CREATE TABLE IF NOT EXISTS key_hourly ("
+			    "  day   TEXT    NOT NULL," // 'YYYY-MM-DD' 本地时区
+			    "  hour  INTEGER NOT NULL," // 0..23 本地时区
+			    "  key   TEXT    NOT NULL," // 归一化键名，见 kc_hook.cpp
+			    "  count INTEGER NOT NULL,"
+			    "  PRIMARY KEY (day, hour, key)"
+			    ") WITHOUT ROWID;")) {
 		return false;
 	}
 	if (!exec(
-				"CREATE TABLE IF NOT EXISTS run_log ("
-				"  id         INTEGER PRIMARY KEY AUTOINCREMENT,"
-				"  started_at TEXT NOT NULL,"
-				"  ended_at   TEXT,"   // NULL = 那次没正常结束（被强杀/断电）
-				"  version    TEXT NOT NULL,"
-				"  note       TEXT"
-				");")) {
+			    "CREATE TABLE IF NOT EXISTS run_log ("
+			    "  id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+			    "  started_at TEXT NOT NULL,"
+			    "  ended_at   TEXT," // NULL = 那次没正常结束（被强杀/断电）
+			    "  version    TEXT NOT NULL,"
+			    "  note       TEXT"
+			    ");")) {
 		return false;
 	}
 	return true;
@@ -106,9 +106,9 @@ bool Store::commit(const std::vector<Row> &rows) {
 
 	sqlite3_stmt *stmt = nullptr;
 	if (!prepare(
-				"INSERT INTO key_hourly(day,hour,key,count) VALUES(?1,?2,?3,?4) "
-				"ON CONFLICT(day,hour,key) DO UPDATE SET count = count + excluded.count;",
-				&stmt)) {
+			    "INSERT INTO key_hourly(day,hour,key,count) VALUES(?1,?2,?3,?4) "
+			    "ON CONFLICT(day,hour,key) DO UPDATE SET count = count + excluded.count;",
+			    &stmt)) {
 		exec("ROLLBACK;");
 		return false;
 	}
@@ -148,8 +148,8 @@ bool Store::query_day(const std::string &day, int64_t *total_out,
 	}
 	sqlite3_stmt *stmt = nullptr;
 	if (!prepare("SELECT key, SUM(count) FROM key_hourly WHERE day=?1 "
-				 "GROUP BY key ORDER BY SUM(count) DESC, key ASC;",
-				&stmt)) {
+		     "GROUP BY key ORDER BY SUM(count) DESC, key ASC;",
+			    &stmt)) {
 		return false;
 	}
 	sqlite3_bind_text(stmt, 1, day.c_str(), -1, SQLITE_STATIC);
@@ -163,7 +163,7 @@ bool Store::query_day(const std::string &day, int64_t *total_out,
 		const int64_t c = sqlite3_column_int64(stmt, 1);
 		total += c;
 		if (by_key_out != nullptr) {
-			by_key_out->push_back({ k != nullptr ? k : "", c });
+			by_key_out->push_back({k != nullptr ? k : "", c});
 		}
 	}
 	sqlite3_finalize(stmt);
@@ -214,8 +214,8 @@ bool Store::query_days(const std::string &from, const std::string &to,
 	}
 	sqlite3_stmt *stmt = nullptr;
 	if (!prepare("SELECT day, SUM(count) FROM key_hourly WHERE day>=?1 AND day<=?2 "
-				 "GROUP BY day ORDER BY day ASC;",
-				&stmt)) {
+		     "GROUP BY day ORDER BY day ASC;",
+			    &stmt)) {
 		return false;
 	}
 	sqlite3_bind_text(stmt, 1, from.c_str(), -1, SQLITE_STATIC);
@@ -228,7 +228,7 @@ bool Store::query_days(const std::string &from, const std::string &to,
 		const char *d = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
 		const int64_t c = sqlite3_column_int64(stmt, 1);
 		if (out != nullptr) {
-			out->push_back({ d != nullptr ? d : "", c });
+			out->push_back({d != nullptr ? d : "", c});
 		}
 	}
 	sqlite3_finalize(stmt);
@@ -334,7 +334,7 @@ bool Store::recent_runs(int limit, std::vector<std::pair<std::string, std::strin
 		const char *s = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
 		const char *e = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
 		if (out != nullptr) {
-			out->push_back({ s != nullptr ? s : "", e != nullptr ? e : "" });
+			out->push_back({s != nullptr ? s : "", e != nullptr ? e : ""});
 		}
 	}
 	sqlite3_finalize(stmt);

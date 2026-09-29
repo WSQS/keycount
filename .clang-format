@@ -1,0 +1,26 @@
+---
+# keycount 的 C/C++ 风格。**反推自现有代码**（不是新发明的风格）：
+#   tab 缩进（1 级 = 1 tab）、指针/引用右侧对齐（`Store &x`）、case 缩进、
+#   短函数/短 case 允许单行、不自动排 include、不强制列宽（现有代码有 149 列的行，
+#   强行折行只会制造 diff 噪音）。
+#
+# 续行：旧代码是"对齐到括号列、再向上取 tab 停位"（+2 级），clang-format 精确列对齐
+# 复现不了；用 `DontAlign` + `ContinuationIndentWidth: 16` 最接近（实测全仓库 6 个
+# 文件只差 73 行，且**全是空白**）。套用一次后即稳定。
+Language: Cpp
+BasedOnStyle: LLVM
+UseTab: ForContinuationAndIndentation
+TabWidth: 8
+IndentWidth: 8
+ContinuationIndentWidth: 16
+AlignAfterOpenBracket: DontAlign
+ColumnLimit: 0
+PointerAlignment: Right
+AccessModifierOffset: -8
+BreakBeforeBraces: Attach
+IndentCaseLabels: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: Never
+SortIncludes: Never
+NamespaceIndentation: None

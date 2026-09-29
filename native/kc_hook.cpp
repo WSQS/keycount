@@ -239,9 +239,12 @@ std::string scancode_name(uint32_t sc, bool extended) {
 	static const char *row_q = "qwertyuiop";
 	static const char *row_a = "asdfghjkl";
 	static const char *row_z = "zxcvbnm";
-	if (sc >= 0x10 && sc <= 0x19) return std::string(1, row_q[sc - 0x10]);
-	if (sc >= 0x1E && sc <= 0x26) return std::string(1, row_a[sc - 0x1E]);
-	if (sc >= 0x2C && sc <= 0x32) return std::string(1, row_z[sc - 0x2C]);
+	if (sc >= 0x10 && sc <= 0x19)
+		return std::string(1, row_q[sc - 0x10]);
+	if (sc >= 0x1E && sc <= 0x26)
+		return std::string(1, row_a[sc - 0x1E]);
+	if (sc >= 0x2C && sc <= 0x32)
+		return std::string(1, row_z[sc - 0x2C]);
 	if (sc >= 0x3B && sc <= 0x44) {
 		char buf[8];
 		snprintf(buf, sizeof(buf), "f%d", int(sc - 0x3B) + 1);

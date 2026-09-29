@@ -14,11 +14,11 @@ namespace kc {
 
 // 一次物理按键。注意：IME 无关 —— 用拼音打「你好」记到的是 n i h a o 五下。
 struct KeyEvent {
-	uint32_t vk = 0;         // Win32 虚拟键码
-	uint32_t scancode = 0;   // 硬件扫描码（make code，已去掉 E0/E1 前缀）
-	bool extended = false;   // 是否 E0/E1 前缀
-	bool is_down = true;     // 按下还是抬起
-	bool repeated = false;   // 长按自动重复（Windows 会持续发 down）
+	uint32_t vk = 0;       // Win32 虚拟键码
+	uint32_t scancode = 0; // 硬件扫描码（make code，已去掉 E0/E1 前缀）
+	bool extended = false; // 是否 E0/E1 前缀
+	bool is_down = true;   // 按下还是抬起
+	bool repeated = false; // 长按自动重复（Windows 会持续发 down）
 };
 
 // 扫描码 → 归一化键名。规则见 SPEC.md：
