@@ -73,6 +73,9 @@ function M.setup(_opts)
   -- C/C++ 的 LSP（clangd，零插件）。找不到 clangd 就静默不启（:KcLsp 可查）。
   require("kc.lsp").setup()
 
+  -- 区域标记（human/ai）在编辑器里可见（软事：只显示、只提示，从不拦人）。
+  require("kc.zone").setup()
+
   vim.api.nvim_create_user_command("KcPick", function() M.pick() end,
     { desc = "kc: 挑一个文件编辑" })
   vim.api.nvim_create_user_command("KcHelp", function() require("kc.help").show() end,

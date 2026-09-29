@@ -508,6 +508,44 @@ else
   sk "没有 uv，跳 zonecheck 判据"
 fi
 
+# ---------- ㉗ 区域标记在编辑器里可见（P2） ----------
+echo "########## ㉗ zone P2：plan() 行映射/空区域/嵌套 + 真跑 check/judge/refresh"
+cat > "$nook/.nvim/xdg/zone_check.lua" <<'LUA'
+local z = require("kc.zone")
+local bad = 0
+local function eq(a, b, m) if a ~= b then bad = bad + 1; io.write(" BAD " .. m .. " got=" .. tostring(a) .. " want=" .. tostring(b) .. "\n") end end
+local function pick(list, zone) for _, s in ipairs(list) do if s.zone == zone then return s end end end
+-- plan：内容行 1 基闭区间 → extmark 0 基（end_row 含）
+local e = { regions = { { zone = "human", begin = 2, ["end"] = 3, depth = 0 }, { zone = "ai", begin = 6, ["end"] = 6, depth = 0 } }, unmarked = { { 5, 5 } } }
+local p = z.plan(e, { highlight_legacy = true })
+eq(pick(p, "human").row0, 1, "human.row0")
+eq(pick(p, "human").end_row, 2, "human.end_row")
+eq(pick(p, "human").opts.sign_text, "H", "human.sign")
+eq(pick(p, "ai").row0, 5, "ai.row0")
+eq(pick(p, "legacy").row0, 4, "legacy.row0")
+eq(#z.plan(e, { highlight_legacy = false }), 2, "legacy-off")
+eq(#z.plan({ regions = { { zone = "human", begin = 4, ["end"] = 3, depth = 0 } } }, {}), 0, "empty-region-skipped")
+local nest = z.plan({ regions = { { zone = "ai", begin = 2, ["end"] = 9, depth = 0 }, { zone = "human", begin = 4, ["end"] = 5, depth = 1 } } }, {})
+eq(pick(nest, "human").opts.priority > pick(nest, "ai").opts.priority, true, "nested-human-wins")
+-- 集成：真跑检查器与异步 refresh
+vim.cmd("edit " .. vim.fn.fnameescape(vim.fn.getcwd() .. "/native/kc_hook.cpp"))
+local buf = vim.api.nvim_get_current_buf()
+eq(z.check(0), 0, "check-0-errors")
+local j = z.judge_current(0)
+eq(j ~= nil and j.decision, "allow", "judge-nochange-allow")
+z.refresh(0)
+eq(vim.wait(20000, function() return vim.b[buf].kc_zone_covered == true end, 200), true, "refresh-covered")
+local cn = vim.b[buf].kc_zone_counts or {}
+eq((cn.human or 0) + (cn.ai or 0), 0, "no-human-ai")
+eq(vim.b[buf].kc_zone_marks >= 1, true, "legacy-block-drawn")
+io.write("bad=" .. bad .. "\n")
+LUA
+out=$(timeout 180 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/zone_check.lua" +qa! 2>&1); rc=$?
+case "$out" in
+  *"bad=0"*) ok "plan() 映射/空区域/嵌套 + check(0 错) + judge(零改动 allow) + refresh 都过" ;;
+  *) no "zone P2 判据失败（rc=$rc）：$out" ;;
+esac
+
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
 [ "$failed" -eq 0 ]

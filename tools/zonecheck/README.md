@@ -58,9 +58,11 @@ uv run --no-project python tools/zonecheck/test_zonecheck.py    # 17 条
 也接进了 nook 的判据 runner（`sopho-nook/tools/criteria.sh` ㉖）：单测 + 仓库 `check` 0 错 +
 一条 **CLI 级** `judge`（actor=ai 碰 human 必须 deny/rc=1）。
 
-## 现在还没做的
+## 进度
 
-- **P2**：nvim 侧（区域上色 + 保存时检查）——只显示，**不拦人**。
-- **P3**：pi 侧的门（换掉内置 `write`/`edit`，走 `judge`；fail-closed）。
-- 目前**没有任何文件被标成 human**（`defaultZone=legacy`，全仓库都是 legacy）——
-  机制能跑，但"保护人写的代码"要等你真开始标才成立。
+- **P1（检查器）**：已做 —— `check` / `stats` / `judge`，判据 ㉖。
+- **P2（nvim 侧）**：已做 —— `sopho-nook/nvim/lua/kc/zone.lua`（区域上色 / sign / 行尾虚文本 + `:KcZoneStatus`、
+  `:KcZoneCheck`、`:KcZoneJudge`、`:KcZoneRefresh`、`:KcZoneToggleLegacy`），**只显示、只提示，从不拦人**；判据 ㉗。
+- **P3（pi 侧的门）**：未做 —— 换掉内置 `write`/`edit`，走 `judge`，fail-closed。
+  在你有第一块 human 区之前，做了也没意义。
+- 目前**没有任何文件被标成 human**（`defaultZone=legacy`，全仓库都是 legacy）。
