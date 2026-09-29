@@ -106,7 +106,7 @@ void remember_prev_foreground() {
 	if (env != nullptr && *env != '\0') {
 		const unsigned long long parsed = std::strtoull(env, nullptr, 0);
 		if (parsed != 0) {
-			HWND h = reinterpret_cast<HWND>(static_cast<intptr_t>(parsed));
+			HWND h = to_hwnd(static_cast<int64_t>(parsed));
 			if (IsWindow(h)) {
 				g_prev_foreground = h;
 				return;
