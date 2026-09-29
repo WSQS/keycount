@@ -1,15 +1,48 @@
 #!/usr/bin/env bash
-# 判据：跑一条命令，并证明它没有写进"工程外"的任何地方。按当前平台选择快照集。
+# 判据：跑一条命令，并证明它没有写进"工程外"的任何地方。按当前平台**和被测对象**选择快照集。
 #
 #   bin/check-isolation -- bin/nvim-local --headless +q
-#   bin/check-isolation -- bin/pi-local --version
+#   bin/check-isolation --scope nvim -- bin/nvim-local --headless +q
+#   bin/check-isolation --scope pi   -- bin/pi-local --version
+#
+# 为什么要 `--scope`：默认的宽名单里有两个 npm 树（%APPDATA%\npm 18 万项 +
+# %LOCALAPPDATA%\npm-cache 3 万项），一扫就是 ~20s/快照。但 nvim 根本不写 npm，
+# `pi-local --version` 也不写（pi 的 fd 是自己下载到 <nook>/.agent/bin）。
+# 按命令裁剪后：nvim ~2s、pi ~0.2s。
+#
+# ⚠️ 取舍（明写）：`--scope` 把"任意全局落点"收窄成"**该工具自己的全局默认目录**"。
+#   那正是我们要防的失效模式（漏设 XDG_*/PI_CODING_AGENT_DIR ⇒ 落到全局默认），
+#   但名单之外的意外落点就看不见了。所以：
+#     · 默认仍是 `all`（宽、保守）；
+#     · **如果以后让 pi 会话真的跑 npm**，把 npm 两棵树加回 `pi_targets`。
 set -euo pipefail
 
-if [ "${1:-}" != "--" ] || [ "$#" -lt 2 ]; then
-  echo "用法: bin/check-isolation -- <命令> [参数...]" >&2
-  exit 2
+usage() {
+  echo "用法: bin/check-isolation [--scope nvim|pi|all] -- <命令> [参数...]" >&2
+  echo "      --scope 默认 all（宽名单，保守）" >&2
+  echo "      bin/check-isolation [--scope nvim|pi|all] --print-targets   # 打印该 scope 要扫哪些目录（判据用）" >&2
+}
+
+scope="all"; print_targets=0
+while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+  case "$1" in
+    --scope) scope="${2:-}"; shift 2 ;;
+    --print-targets) print_targets=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+done
+case "$scope" in
+  nvim|pi|all) ;;
+  *) echo "check-isolation: --scope 只能是 nvim|pi|all（给的是 '$scope'）" >&2; exit 2 ;;
+esac
+if [ "$print_targets" != 1 ]; then
+  if [ "${1:-}" != "--" ] || [ "$#" -lt 2 ]; then
+    usage
+    exit 2
+  fi
+  shift
 fi
-shift
 
 # 取景框：本脚本住在 <nook>/bin/ 里，所以能自己推算出 nook 与其父目录
 nook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,7 +54,7 @@ case "$(uname -s)" in
   *)                    plat=unix ;;
 esac
 
-if [ "$plat" = unix ]; then
+if [ "$plat" = unix ] && [ "$#" -gt 0 ]; then
   case "$1" in
     *.cmd|*.CMD)
       echo "check-isolation: 被测命令是 Windows 的 .cmd，但当前判定为 unix 平台（你在 WSL/MSYS 里？）。" >&2
@@ -30,24 +63,25 @@ if [ "$plat" = unix ]; then
   esac
 fi
 
-targets=(); prune=()
+prune=(); nvim_targets=(); pi_targets=(); extra_all_targets=()
 if [ "$plat" = unix ]; then
   prune=( -path "$HOME/.npm/_logs" -o -path "$HOME/.npm/_logs/*" )
-  targets=(
-    "$HOME/.pi/agent"
+  nvim_targets=(
     "$HOME/.config/nvim"
     "$HOME/.local/share/nvim"
     "$HOME/.local/state/nvim"
     "$HOME/.cache/nvim"
+    "${TMPDIR:-/tmp}/nvim.user"
+  )
+  # 故意**不**包含 ~/.pi/profiles/**：那是跑在本机 harness 里的会话自己持续在写的目录。
+  pi_targets=(
+    "$HOME/.pi/agent"
     "$HOME/.local/share/pi"
     "$HOME/.config/pi"
     "$HOME/.local/state/pi"
     "$HOME/.cache/pi"
-    "$HOME/.npm"
-    "$HOME/.bun"
-    "${TMPDIR:-/tmp}/nvim.user"
   )
-  # 故意**不**包含 ~/.pi/profiles/**：那是跑在本机 harness 里的会话自己持续在写的目录。
+  extra_all_targets=( "$HOME/.npm" "$HOME/.bun" )
 else
   # Git Bash 的 $LOCALAPPDATA 等是 "C:\Users\..." 形式：find -path 的模式走 fnmatch，
   # 反斜杠在那儿是转义符 ⇒ 剪枝会静默失效（实测 _logs 一条都排除不掉）。用 cygpath 归一化。
@@ -58,26 +92,38 @@ else
   T="$(up "${TEMP:-${TMP:-/tmp}}")"
   # 注意：windows 分支的快照用了 -mindepth/-maxdepth 分两趟，而 -prune 与它们并存时不可靠，
   # 所以 npm 日志的排除放在 snapshot() 的输出端做（见那里），这里不留"看起来在生效"的死变量。
-  targets=(
-    "$U/.pi/agent"
+  nvim_targets=(
     "$L/nvim"
     "$L/nvim-data"
     "$R/nvim"
-    "$L/npm-cache"
-    "$R/npm"
     "$T/nvim"          # Windows 上 nvim 默认 cache 目录
     "$T/nvim.0"        # 默认 run 目录（uid 0）
     "$T/nvim.user"     # 这是个 no-op，留着只为说明"这不是 Windows 的落点"
   )
+  pi_targets=( "$U/.pi/agent" )
+  extra_all_targets=( "$L/npm-cache" "$R/npm" )
+fi
+
+case "$scope" in
+  nvim) targets=("${nvim_targets[@]}") ;;
+  pi)   targets=("${pi_targets[@]}") ;;
+  all)  targets=("${nvim_targets[@]}" "${pi_targets[@]}" "${extra_all_targets[@]}") ;;
+esac
+
+if [ "$print_targets" = 1 ]; then
+  printf '%s\n' "${targets[@]}"
+  exit 0
 fi
 
 snapshot() {
   for d in "${targets[@]}"; do
     [ -e "$d" ] || { echo "MISSING $d"; continue; }
     if [ "$plat" = windows ]; then
-      # Windows 侧 %APPDATA%\npm 有 17 万项，逐项 stat 要 5 分钟。
+      # 深处的 npm 树有 20 万项，逐项 stat 要几分钟。
       # 折中：4 层以下只比"名字集合"（抓新增/删除/改名），近处（≤3 层）才比 size+mtime。
       # 代价：深层文件的"原地修改"抓不到 —— 写在这里，别当没有。
+      # 实测：这已经是最省的深层感知办法（≤4 层 stat=15.9s、≤5 层 stat=43.6s，
+      #       而"深层只列名字"=9.5s 且覆盖任意深度）。
       # grep -v 在「输入为空 / 全被排除」时会返回 1；配合 set -euo pipefail 会让
       # 整个判据在拍 before 快照时静默退出，连 PASS/FAIL 都来不及打印。
       # 空集合是合法快照，不是错误，所以显式吞掉这个状态码。
@@ -107,12 +153,12 @@ set -e
 
 snapshot > "$after"
 
-echo "--- check-isolation[$plat]: 被测命令退出码 $rc"
+echo "--- check-isolation[$plat scope=$scope]: 被测命令退出码 $rc"
 if diff -u "$before" "$after" > /tmp/check-isolation.diff; then
-  echo "--- check-isolation[$plat]: PASS（工程外无任何新增/修改/删除）"
+  echo "--- check-isolation[$plat scope=$scope]: PASS（已扫范围内无任何新增/修改/删除）"
   exit "$rc"
 else
-  echo "--- check-isolation[$plat]: FAIL（下面的差异就是「漏出去」的东西）" >&2
+  echo "--- check-isolation[$plat scope=$scope]: FAIL（下面的差异就是「漏出去」的东西）" >&2
   cat /tmp/check-isolation.diff >&2
   exit 1
 fi

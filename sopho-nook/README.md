@@ -5,7 +5,7 @@ sopho-nook/bin/nook                       # 「nook 进去」：无参数进选�
 sopho-nook/bin/nvim-local <文件>          # 直接打开某个文件（配置/状态/缓存全在 sopho-nook/.nvim/xdg）
 sopho-nook/bin/pi-local                   # AI 侧：本项目的 pi（数据在 sopho-nook/.agent，"情况"在 sopho-nook/agents/skills）
 sopho-nook/bin/kctest                     # 这个仓库真正的验证（native 自检 + 扩展编译 + 数据链路）
-sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写到工程外
+sopho-nook/bin/check-isolation --scope nvim -- <命令>  # 判据：证明它没写到工程外
 ```
 
 **核心用法是“nook 进去”，不是“打开某个文件”。** 进 nvim 之后开文件用 `<leader>f`（同一个选择列表）、
@@ -39,10 +39,10 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 
 | # | 功能 | 怎么验（照抄即可） | 状态 |
 |---|---|---|---|
-| 1 | **项目内 nvim**：init 与五个 XDG 目录全在 `sopho-nook/` 内 | `bin/check-isolation -- bin/nvim-local --headless +q` → 要 PASS；`bin/nvim-local --headless -c 'lua for _,k in ipairs({"config","data","state","cache","run"}) do io.write(k.."="..vim.fn.stdpath(k).."\n") end' +q` → 五条都要落在 nook 里 | 已验（本机 · Windows 11 · nvim v0.12.1；Windows 分支首次判据 62 秒） |
-| 2 | **项目内 pi**：配置/会话/凭据落在 `.agent/` | `bin/check-isolation -- bin/pi-local --version` → 要 PASS | 已验 |
+| 1 | **项目内 nvim**：init 与五个 XDG 目录全在 `sopho-nook/` 内 | `bin/check-isolation --scope nvim -- bin/nvim-local --headless +q` → 要 PASS；`bin/nvim-local --headless -c 'lua for _,k in ipairs({"config","data","state","cache","run"}) do io.write(k.."="..vim.fn.stdpath(k).."\n") end' +q` → 五条都要落在 nook 里 | 已验（本机 · Windows 11 · nvim v0.12.1；Windows 分支首次判据 ~3 秒（2026-09-29 裁 scope 后；之前是 60s+，因为宽名单里有两个 npm 树）） |
+| 2 | **项目内 pi**：配置/会话/凭据落在 `.agent/` | `bin/check-isolation --scope pi -- bin/pi-local --version` → 要 PASS | 已验 |
 | 3 | **本项目技能跟项目走**：`agents/skills/**` 由 `bin/pi-local` 用 `--skill` 显式加载 | 判据 ⑪（含"不加 `--skill` 就没有"的对照） | 已验 |
-| 4 | **判据自证**：`check-isolation` 按平台选快照集，并有**取景框**（`<nook>` 旁边不得出现同前缀兄弟项） | `bin/check-isolation -- <任意命令>`；Windows 侧**只能用 Git Bash 跑** | 已验 |
+| 4 | **判据自证**：`check-isolation` 按平台**和 `--scope`（nvim/pi/all）**选快照集，并有**取景框**（`<nook>` 旁边不得出现同前缀兄弟项） | `bin/check-isolation --scope <nvim|pi|all> -- <任意命令>`；`--print-targets` 打印该 scope 扫哪些目录；Windows 侧**只能用 Git Bash 跑** | 已验（判据 ㉙） |
 | 5 | **帮助页现算**：`<leader>?` 的清单从实际注册的映射算出来，不落一份硬编码 | 判据 ⑤（临时加一条映射必须立刻出现；没有 `kc:` 前缀的必须不出现） | 已验 |
 | 6 | **路径只推导一处**：`kc/paths.lua`，其余模块一律 `require` 它 | 判据 ⑥（`:KcInfo` 对上 shell 推出来的） | 已验 |
 | 7 | **`<leader>a` 的 pi 浮窗**：工程内 pi、Esc 单按转发/双按关闭 | 打开后按 `<Esc><Esc>` 关闭、`<Esc>` 打断；ESC 转发通道见 `kc/pi.lua` 的 `_send_esc` | **只验了"通道能送 0x1b"，真终端里没人看过**（同 note 那份的已知未验） |

@@ -57,25 +57,27 @@ fi
 # ---------- 3. 扩展编译 ----------
 echo "########## 扩展编译（scons template_debug）"
 dll="$repo/gdext/bin/keycount.windows.template_debug.x86_64.dll"
+stamp="$repo/gdext/.kctest-built"  # 构建戳：记下“到这时的源码已成功编过”（不进 git）
 need_build=1
-if [ "$do_build" != 1 ] && [ -f "$dll" ]; then
-  # 产物比所有参与编译的源都新 ⇒ 跳过重编。
-  # 因为 scons 每次都要重读 godot-cpp 那一大堆 SConscript（约 10–15s），而这里要的是
-  # “现在这份 dll 是不是当前源码编出来的”，不是“重编一次证明能编”。
+if [ "$do_build" != 1 ] && [ -f "$dll" ] && [ -f "$stamp" ]; then
+  # 比**构建戳**而不是 dll 的 mtime：scons 按内容判“要不要重编”，文件被 touch（内容未变）时
+  # 它不重链、dll 的 mtime 就不再是最新的 ⇒ 拿 dll 当基准会永远觉得“该重编”（实测踩过）。
+  # scons 每次都要重读 godot-cpp 的 SConscript（~15s），而这里要答的是“当前源码编过没”。
   newer=$(find "$repo/gdext/src" "$repo/native" "$repo/thirdparty/sqlite" \
                 "$repo/gdext/SConstruct" "$repo/gdext/api/extension_api.json" \
                 -type f \( -name '*.cpp' -o -name '*.c' -o -name '*.h' \
                            -o -name 'SConstruct' -o -name '*.json' \) \
-                -newer "$dll" 2>/dev/null | head -1)
+                -newer "$stamp" 2>/dev/null | head -1)
   [ -z "$newer" ] && need_build=0
 fi
 if [ "$need_build" = 0 ]; then
-  ok "scons：产物比源码新，跳过重编（强制重编：bin/kctest --build）"
+  ok "scons：自上次成功构建后源码没变，跳过重编（强制：bin/kctest --build）"
 elif command -v scons >/dev/null 2>&1; then
   out=$(cd "$repo/gdext" && scons platform=windows target=template_debug api_version=4.7 -j12 2>&1)
   rc=$?
   if [ "$rc" -eq 0 ] && ! printf '%s' "$out" | grep -qE " error |Error [0-9]"; then
     ok "scons 通过"
+    touch "$stamp"
   else
     no "scons 失败（rc=$rc）"; printf '%s\n' "$out" | grep -E " error |Error [0-9]" | head -5 | sed 's/^/     /'
   fi

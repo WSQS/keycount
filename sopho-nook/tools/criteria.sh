@@ -21,14 +21,18 @@ NVIM="$B/nvim-local"
 # 这个 nvim 的 -c 'lua ...' 需要把 lua 当参数传，用个短包装免得引号互相打架
 nv() { "$NVIM" --headless -c "$1" +q 2>&1; }
 
-# ---------- ① / ② 隔离（并发跑：check-isolation 每次要拍两遍全局目录快照，很贵） ----------
-# 并发是安全的：每个实例自己的 before/after 都夹着**它自己的**被测命令；
-# 并发最多带来“别人的写入也算到我头上”的**误报**，不会让真泄露漏掉。
-echo "########## ① / ② check-isolation（并发；工程外零差异）"
+# ---------- ① / ② 隔离（按命令裁 scope；并发跑） ----------
+# ① nvim 只盯 nvim 自己的 XDG/临时目录；② pi 只盯 ~/.pi/agent。
+# 默认宽名单还带两个 npm 树（22 万项），而这两个命令都不会写 npm —— 扫它纯是浪费
+# （实测：宽名单 19.5s/快照；裁完 nvim ~3s、pi ~1s）。宽名单保留为 `--scope all`。
+# ⚠️ 若以后让 pi 会话真的跑 npm，要把 npm 两棵树加回 check-isolation 的 pi_targets。
+# 并发是安全的：每个实例的 before/after 都夹着**它自己的**被测命令；
+# 并发最多带来"别人的写入也算到我头上"的**误报**，不会让真泄露漏掉。
+echo "########## ① / ② check-isolation（scope=nvim / scope=pi；并发）"
 _iso1=$(mktemp); _iso2=$(mktemp)
-"$B/check-isolation" -- "$NVIM" --headless +q >"$_iso1" 2>&1 &
+"$B/check-isolation" --scope nvim -- "$NVIM" --headless +q >"$_iso1" 2>&1 &
 _iso_p1=$!
-"$B/check-isolation" -- "$B/pi-local" --version >"$_iso2" 2>&1 &
+"$B/check-isolation" --scope pi -- "$B/pi-local" --version >"$_iso2" 2>&1 &
 _iso_p2=$!
 wait "$_iso_p1"; wait "$_iso_p2"
 out=$(cat "$_iso1")
@@ -586,6 +590,26 @@ case "$out" in
 esac
 timeout 120 uv run --no-project python tools/zonecheck/zonecheck.py --root "$(to_native_fmt "$fz")" check >/dev/null 2>&1
 if [ "$?" -eq 0 ]; then ok "格式化后 zonecheck 仍 0 错（标记没被弄坏）"; else no "格式化后 zonecheck 报错"; fi
+
+# ---------- ㉙ check-isolation 的 --scope 真的在裁范围 ----------
+echo "########## ㉙ check-isolation --scope：目标集确实不同（nvim 不扫 npm，pi 不扫 nvim）"
+_nv=$("$B/check-isolation" --scope nvim --print-targets 2>&1)
+_pi=$("$B/check-isolation" --scope pi --print-targets 2>&1)
+_all=$("$B/check-isolation" --scope all --print-targets 2>&1)
+"$B/check-isolation" --scope bogus -- true >/dev/null 2>&1; _brc=$?
+if [ "$_brc" -ne 2 ]; then
+  no "非法 --scope 的退出码是 $_brc（应为 2）"
+elif printf '%s' "$_nv" | grep -q npm; then
+  no "scope=nvim 居然包含 npm：$_nv"
+elif printf '%s' "$_pi" | grep -q 'nvim'; then
+  no "scope=pi 里混进了 nvim：$_pi"
+elif ! printf '%s' "$_nv" | grep -q 'nvim'; then
+  no "scope=nvim 里没有 nvim 目录：$_nv"
+elif ! printf '%s' "$_all" | grep -q npm; then
+  no "scope=all 里没有 npm：$_all"
+else
+  ok "scope=nvim 不扫 npm / scope=pi 不扫 nvim / all 含两者；非法 scope 退 2"
+fi
 
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
