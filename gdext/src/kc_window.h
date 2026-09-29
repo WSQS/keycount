@@ -18,7 +18,7 @@ protected:
 
 public:
 	KeyCountWindow() = default;
-	~KeyCountWindow() override;
+	~KeyCountWindow() override = default;
 
 	// WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
 	// —— 不抢焦点、不进 Alt-Tab。桌宠必须开这个，否则它会吞掉你正在编辑器里打的字。

@@ -144,7 +144,7 @@ int64_t KeyCountWindow::get_foreground() const {
 	return 0;
 #endif
 }
-
+// >>> zone:human
 bool KeyCountWindow::restore_prev_foreground() {
 #ifdef _WIN32
 	if (g_prev_foreground == nullptr || !IsWindow(g_prev_foreground)) {
@@ -158,8 +158,7 @@ bool KeyCountWindow::restore_prev_foreground() {
 	return false;
 #endif
 }
-
-KeyCountWindow::~KeyCountWindow() = default;
+// <<<
 
 bool KeyCountWindow::set_no_activate(int64_t hwnd, bool on) {
 	return no_activate_impl(hwnd, on);
