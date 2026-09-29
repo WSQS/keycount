@@ -66,6 +66,10 @@ function M.setup(_opts)
   map("<leader>m", function() vim.cmd.edit(vim.fn.fnameescape(paths.repo() .. "/README.md")) end,
     "打开 README.md")
 
+  -- 外部改动自动重载：pi（或任何外部进程）写了盘，nvim 这边自己跟上。
+  -- 幂等；且会用当前代码顶掉旧回调，所以 <leader>r 之后 watch 逻辑也是新的。
+  require("kc.watch").start()
+
   vim.api.nvim_create_user_command("KcPick", function() M.pick() end,
     { desc = "kc: 挑一个文件编辑" })
   vim.api.nvim_create_user_command("KcHelp", function() require("kc.help").show() end,
@@ -76,6 +80,9 @@ function M.setup(_opts)
     { desc = "kc: 在浮窗里开工程内 pi" })
   vim.api.nvim_create_user_command("KcReload", function() require("kc.reload").reload() end,
     { desc = "kc: 重载 nook 自己的 Lua" })
+  vim.api.nvim_create_user_command("KcWatch", function()
+    vim.notify(require("kc.watch").status(), vim.log.levels.INFO, { title = "kc watch" })
+  end, { desc = "kc: 外部改动自动重载的现状" })
   vim.api.nvim_create_user_command("KcInfo", function()
     vim.notify(table.concat(M.info_lines(), "\n"), vim.log.levels.INFO, { title = "kc info" })
   end, { desc = "kc: 打印推导出来的路径（调试 nook 自己用）" })

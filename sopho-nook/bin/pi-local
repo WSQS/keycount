@@ -26,6 +26,27 @@ fi
 extra=()
 [ -d "$nook/agents/skills" ] && extra+=(--skill "$nook/agents/skills")
 
+# ---- 把政策目录挂进数据目录 ----
+# pi 只从约定目录发现资源，而 subagent 扩展**认死** {agentDir}/agents、pi 认 {agentDir}/prompts；
+# {agentDir} = $PI_CODING_AGENT_DIR 是数据目录（不进 git）。用软链把 pi/ 下的政策挂进去。
+# 必须带 MSYS=winsymlinks:nativestrict，否则 MSYS 的 ln -s 会静默拷成普通文件（README 记过这个坑）。
+link_policy_dir() {
+  local name="$1"
+  local src="$nook/pi/$name"
+  local dst="$PI_CODING_AGENT_DIR/$name"
+  [ -d "$src" ] || return 0
+  if [ -L "$dst" ] || [ -e "$dst" ]; then return 0; fi
+  if ! MSYS=winsymlinks:nativestrict ln -s "../pi/$name" "$dst" 2>/dev/null; then
+    echo "pi-local: 警告 -- 建软链失败：$dst -> ../pi/$name" >&2
+    echo "          （Windows 需开发者模式或管理员；没链上时 subagent 会报 'Available agents: none'）" >&2
+  fi
+}
+link_policy_dir agents
+link_policy_dir prompts
+
+# subagent 工具（政策，进 git）：显式 --extension，不靠 .agent/extensions 的自动发现。
+[ -d "$nook/pi/extensions/subagent" ] && extra+=(--extension "$nook/pi/extensions/subagent")
+
 # 角色说明（政策，进 git）。pi 的 --append-system-prompt 吃"文本或文件"：
 # 值是**存在的文件**就读它的内容当文本、否则当字面字符串（pi 的 resolvePromptInput
 # 就是这么判的），所以这里可以直接指路径，不必把内容拼进命令行。

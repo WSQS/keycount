@@ -49,10 +49,12 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | 8 | **`<leader>t` 验证菜单**：把本项目真正的验证命令做进浮窗 | 判据 ⑬（`bin/kctest` 与 `kc/run.lua` 是同一份清单） | 已验 |
 | 9 | **数据不进 git** | `git -C sopho-nook check-ignore -v .agent .nvim/xdg` | 已验（判据 ⑨） |
 | 10 | **行尾跨平台**：`.cmd` 锁 LF + 必须纯 ASCII | 判据 ⑦⑧ | 已验 |
-| 11 | **改动只落一个文件夹** | `git status --porcelain \| grep '^??'` → 只应出现 `?? sopho-nook/` | 已验（判据 ⑫） |
+| 11 | **改动只落一个文件夹** | 判据 ⑫（`sopho-nook/` **之外**不许出现未跟踪项） | 已验（判据 ⑫） |
 | 12 | **「nook 进去」+ 文件选择列表**：`bin/nook` 无参数进列表，输入筛选、↑↓ 选、`<CR>` 打开；`<leader>f` 在 nvim 里开同一个列表 | 判据 ⑮–⑲（**候选集、排除规则、过滤全是纯函数**，所以能机械验）。候选集 = 仓库里被 git 跟踪的 + 未跟踪但没被忽略的，再排掉二进制与 vendored | 纯函数层已验；浮窗观感见“已知未验” |
 | 13 | **列表跟着选中项滚**：候选比浮窗高时，↑↓ 移动会让列表一起滚，高亮不会掉出窗口 | 判据 ⑳（`layout()` 纯函数不变量）+ ㉑（headless 真开列表，下移 30 次后高亮仍在窗口内） | 已验 |
 | 14 | **nook 自己的 Lua 热更**：`<leader>r` 重载 `nvim/lua/kc/**`，改完不必重启 nvim | 判据 ㉒（只清 `kc.*`、缓存真的清掉、键位重注册、**失败返回 false 不假装成功**） | 已验（改 `init.lua` 仍需重启，见下） |
+| 15 | **外部改动自动重载**：pi（或任何外部进程）改了盘上的文件，nvim 缓冲区自己跟上 | 判据 ㉓（纯函数 `decide()` 的 5 种边界 + 真 `uv_fs_event`：干净自动重载、**脏缓冲区绝不覆盖**） | 已验（headless + 真文件）；真终端观感见“已知未验” |
+| 16 | **subagent 工具**：把任务派给隔离子进程的专用 agent（scout / planner / reviewer / worker），支持单发 / 并行 / 链式 | 判据 ㉔（SDK `getActiveToolNames()` 真验注册）+ **端到端实跑**：父进程只开 `subagent`，`agent="scout"` 拿回`native/` 的文件清单（自己无读文件的工具，答案只能来自子进程） | 已验（单发）；并行/链式见“已知未验” |
 
 ## 这个项目在这个 nook 里加了什么
 
@@ -68,9 +70,12 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | `nvim/lua/kc/help.lua` | `<leader>?` 现算的快捷键页 |
 | `nvim/lua/kc/paths.lua` | nook / repo / 各子目录的路径**只在这里推导一次** |
 | `nvim/lua/kc/reload.lua` | `<leader>r`：清掉 `package.loaded` 里的 `kc.*` 再 `setup()`，热更 nook 自己的 Lua。**失败如实报错、返回 false**；只认 `kc.*`，不碰内置与别的插件；**不重跑 `init.lua`**（改它仍要重启） |
+| `nvim/lua/kc/watch.lua` | 外部改动自动重载：`uv_fs_event` 盯「已打开文件所在目录」→ 去抖 150ms → 纯函数 `decide()` 判决（干净=读盘；**脏缓冲=只警告不覆盖**；文件没了=保留缓冲）。状态放 `_G`，所以 `<leader>r` 之后 watch 逻辑也是新的 |
 | `agents/ROLE.md` | **角色说明**（政策，进 git）。由 `bin/pi-local` 用 `--append-system-prompt` 指到它 |
 | `agents/skills/keycount-verification/` | 改完东西后**怎么按层验证**（核心自检 → 扩展编译 → 集成 → 不抢焦点 → 落盘 → 单实例） |
 | `tools/criteria.sh` | 这一份的判据 runner：**条数以它的汇总行为准**，不在文档里写死 |
+| `pi/extensions/subagent/` | vendored 自 pi 0.87.1 示例的 **subagent 工具**（与 pi 同为 MIT）：派任务给隔离子进程的 agent。见 `pi/README.md` |
+| `pi/agents/*.md`、`pi/prompts/*.md` | agent 定义（scout/planner/reviewer/worker）与工作流模板；`bin/pi-local` 用软链挂进 `.agent/{agents,prompts}`（扩展只认 `{agentDir}/agents`）。**已去掉写死的 Anthropic 模型**，改为继承派发会话的模型 |
 
 ## 怎么复跑全部判据
 
@@ -96,6 +101,7 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
 #   <leader>a   pi 浮窗
 #   <leader>g   lazygit
 #   <leader>r   重载 nook 自己的 Lua（改 nvim/lua/kc/** 后）
+#   subagent(...)  派子任务（scout/planner/reviewer/worker；注册见判据 ㉔）
 #   :KcInfo     打印推导出来的路径（调试 nook 自己用）
 ```
 
@@ -105,12 +111,15 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
   目前只在 headless 下验过"键位已注册 / 纯函数正确 / 通道能送键"，**没有人在真终端里看过这几个窗口**。
   这条与 note 那份的已知未验是同一类，沿用它的提醒：`vim.fn.jobwait()` 会阻塞主循环、终端模拟不跑，
   用它"看"终端渲染只会拿到空 buffer（那边实测踩过）。
+- **外部改动自动重载（watch）**：机制在 headless 下用**真文件 + 真 `uv_fs_event`** 验过（判据 ㉓），
+  但"真终端里边打字边被 pi 改文件"的观感没人看过 —— 与上面那条同一类已知未验。
+- **subagent 已验到“单发端到端”**：判据 ㉔ 验注册；另外实跑过一次（父进程只开 `subagent`，让它派 scout 去数 `native/*.cpp`）。
+  **没验的**：并行（`tasks=[...]`）与链式（`chain=[...]`）两种模式；以及示例 agent 的 prompt 质量（那是上游的，没改）。
+  复跑：`sopho-nook/bin/pi-local --no-session --no-context-files --tools subagent --print '用 subagent 派 agent="scout" 数 native/ 下的 .cpp 文件'`
 - **`MSYS=winsymlinks:nativestrict` 那个坑**：不带它 `ln -s` 会静默拷成普通文件，
   于是"profile 换模型自动跟过来"这条静默失效。判据 ⑩ 抓的是"是不是软链"，
   但**抓不到"你在别处又用裸 ln -s 建了一个"**。
-- **没做**（相对 note 那份少了两件，都是有意的）：
-  - `watch.lua`（外部改动自动重载缓冲区）：本项目的文件由你和 pi 同时改，这条**值得做**，
-    但它是 note 那份里最难的一块（`uv_fs_event` + 去抖 + 脏缓冲区优先），没验过的代码不该先落进来。
+- **没做**（相对 note 那份少了一件，是有意的）：
   - 状态栏定制：note 那份在状态栏显示"助手/你"的字数比；本项目没有对应物，
     想过显示"今日已记录多少下"，但那要每次渲染查一次库或做缓存 —— 没验过的性能取舍不先塞进来。
 - **`bin/kctest` 与 `<leader>t` 是两份清单**（一份 bash、一份 Lua），靠判据 ⑬ 盯着别漂。

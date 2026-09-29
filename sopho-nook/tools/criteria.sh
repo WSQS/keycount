@@ -152,10 +152,12 @@ else
 fi
 
 # ---------- ⑫ 改动只落一个文件夹 ----------
-echo "########## ⑫ 改动只落一个文件夹（仓库根只多出 sopho-nook/）"
+echo "########## ⑫ 改动只落一个文件夹（未跟踪项不得出现在 sopho-nook/ 之外）"
 untracked=$(git status --porcelain | grep '^??' | sed 's/^?? //' | sort -u)
-unexpected=$(printf '%s\n' "$untracked" | grep -v '^sopho-nook/$' | grep -v '^$')
-if [ -z "$unexpected" ]; then ok "未跟踪项只有 sopho-nook/（或为空，说明已提交）"
+# 注意：nook 整体未入库时 git 会折叠成一条 "?? sopho-nook/"；已入库后就是里面的具体文件。
+# 两种都算“落在 nook 里”，所以要排的是前缀 'sopho-nook/'，不是那一个目录名。
+unexpected=$(printf '%s\n' "$untracked" | grep -v '^sopho-nook/' | grep -v '^$')
+if [ -z "$unexpected" ]; then ok "sopho-nook/ 之外没有任何未跟踪项"
 else no "还多出这些未跟踪项：$unexpected"; fi
 
 # ---------- ⑬ 验证入口 ----------
@@ -344,6 +346,100 @@ case "$out" in
   *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'maps=[0-9]* bad=0' | tail -1)（纯函数边界 + 真重载 + 失败路径都过）" ;;
   *) no "reload 判据失败（rc=$rc）：$out" ;;
 esac
+
+# ---------- ㉓ 外部改动自动重载（watch） ----------
+echo "########## ㉓ watch：纯函数判决 + 真 fs_event（setup 自启 / 干净重载 / 脏缓冲不覆盖）"
+cat > "$nook/.nvim/xdg/watch_check.lua" <<'LUA'
+local w = require("kc.watch")
+local bad = 0
+local function eq(a, b, m) if a ~= b then bad = bad + 1; io.write(" BAD " .. m .. " got=" .. tostring(a) .. " want=" .. tostring(b) .. "\n") end end
+-- setup 应当已经把它开起来了（这条判据自己不再 start）
+eq(w.status():find("started=true") ~= nil, true, "autostart-by-setup")
+-- 纯函数：changed / decide 的全部边界
+eq(w.changed(nil, nil), false, "changed-nil-nil")
+eq(w.changed({ mtime = 1, size = 1 }, nil), true, "changed-has-nil")
+eq(w.changed({ mtime = 1, size = 1 }, { mtime = 1, size = 1 }), false, "changed-same")
+eq(w.changed({ mtime = 1, size = 1 }, { mtime = 2, size = 1 }), true, "changed-mtime")
+eq(w.changed({ mtime = 1, size = 1 }, { mtime = 1, size = 2 }), true, "changed-size")
+eq(w.decide(nil, nil, false), "skip", "decide-nil-nil")
+eq(w.decide(nil, { mtime = 1, size = 1 }, false), "gone", "decide-gone")
+eq(w.decide({ mtime = 2, size = 1 }, { mtime = 1, size = 1 }, false), "reload", "decide-reload")
+eq(w.decide({ mtime = 2, size = 1 }, { mtime = 1, size = 1 }, true), "conflict", "decide-conflict")
+eq(w.decide({ mtime = 1, size = 1 }, { mtime = 1, size = 1 }, true), "skip", "decide-skip")
+-- 集成：真文件 + 真 fs_event
+local dir = vim.fs.normalize(vim.fn.getcwd() .. "/sopho-nook/.nvim/xdg/watchtest")
+vim.fn.mkdir(dir, "p")
+local f = dir .. "/a.txt"
+vim.fn.writefile({ "one" }, f)
+vim.cmd("edit " .. vim.fn.fnameescape(f))
+local buf = vim.api.nvim_get_current_buf()
+w.start()
+local function content() return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n") end
+-- 干净缓冲区，外部改动 → 应自动读盘
+vim.fn.writefile({ "two", "lines" }, f)
+local ok1 = vim.wait(4000, function() return content() == "two\nlines" end, 50)
+eq(ok1, true, "reload-external-change")
+-- 脏缓冲区，外部改动 → 不许覆盖
+vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "local-dirty" })
+vim.bo[buf].modified = true
+vim.fn.writefile({ "three" }, f)
+local ok2 = vim.wait(1500, function() return content() == "three" end, 50)
+eq(ok2, false, "dirty-not-overwritten")
+eq(content(), "local-dirty", "dirty-kept")
+w.stop()
+io.write("bad=" .. bad)
+LUA
+out=$(timeout 60 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/watch_check.lua" +qa! 2>&1); rc=$?
+case "$out" in
+  *"bad=0"*) ok "纯函数 10 条 + 真 fs_event：干净重载、脏缓冲不覆盖" ;;
+  *) no "watch 判据失败（rc=$rc）：$out" ;;
+esac
+
+# ---------- ㉔ subagent 工具（vendored 扩展 + 政策软链） ----------
+echo "########## ㉔ subagent：扩展真的注册了 subagent 工具；agents/prompts 能从 .agent 读到"
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  # 先跑一次 pi-local，让政策软链就位（idempotent）
+  "$B/pi-local" --version >/dev/null 2>&1 || true
+  to_native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+  npmroot=$(npm root -g 2>/dev/null | tr -d '\r')
+  pkg="$(to_native "$npmroot")/@earendil-works/pi-coding-agent"
+  probe="$nook/.nvim/xdg/subagent_check.mjs"
+  cat > "$probe" <<'JS'
+const mod = await import(process.env.KC_PI_URL);
+const { createAgentSession, DefaultResourceLoader, SessionManager } = mod;
+const loader = new DefaultResourceLoader({
+  cwd: process.env.KC_CWD,
+  agentDir: process.env.PI_CODING_AGENT_DIR,
+  additionalExtensionPaths: [process.env.KC_EXT],
+});
+await loader.reload();
+const { session } = await createAgentSession({ resourceLoader: loader, sessionManager: SessionManager.inMemory() });
+console.log("TOOLS=" + JSON.stringify(session.getActiveToolNames()));
+session.dispose();
+JS
+  out=$(KC_PI_URL="file:///$pkg/dist/index.js" \
+        KC_CWD="$(to_native "$repo")" \
+        PI_CODING_AGENT_DIR="$(to_native "$nook/.agent")" \
+        KC_EXT="$(to_native "$nook/pi/extensions/subagent")" \
+        timeout 120 node "$probe" 2>&1 | grep -o 'TOOLS=.*' || true)
+  case "$out" in
+    *'"subagent"'*) ok "扩展注册成功：$out" ;;
+    *) no "subagent 工具没注册：$out" ;;
+  esac
+else
+  sk "没有 node/npm，跳 subagent 注册判据"
+fi
+# agents / prompts 必须能从 {agentDir} 下读到（扩展只认 {agentDir}/agents）
+for f in agents/worker.md prompts/implement.md; do
+  if [ -e "$nook/.agent/$f" ]; then ok ".agent/$f 可读（政策已挂进数据目录）"
+  else no ".agent/$f 读不到（软链没建上？）"; fi
+done
+# 两个启动器都要把它接上
+if grep -q 'pi/extensions/subagent' "$B/pi-local" && grep -qF 'pi\extensions\subagent' "$B/pi-local.cmd"; then
+  ok "bin/pi-local 与 pi-local.cmd 都显式 --extension 指到 pi/extensions/subagent"
+else
+  no "启动器没有把 subagent 扩展接上"
+fi
 
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
