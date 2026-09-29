@@ -18,9 +18,9 @@ using namespace godot;
 namespace {
 
 #ifdef _WIN32
-
+// >>> zone:human
 HWND g_prev_foreground = nullptr;
-
+// <<<
 HWND to_hwnd(int64_t p) {
 	return reinterpret_cast<HWND>(static_cast<intptr_t>(p));
 }
@@ -82,9 +82,8 @@ int64_t ex_style_impl(int64_t) { return -1; }
 #endif // _WIN32
 
 } // namespace
-
+// >>> zone:human
 namespace kc_ext {
-
 // 启动时把「宠物出现之前谁持有键盘」记下来。
 //
 // 为什么需要它：实测发现光给窗口打 WS_EX_NOACTIVATE 不够 —— Godot 自己在启动时
@@ -119,7 +118,7 @@ void remember_prev_foreground() {
 }
 
 } // namespace kc_ext
-
+// <<<
 void KeyCountWindow::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_no_activate", "hwnd", "on"), &KeyCountWindow::set_no_activate);
 	ClassDB::bind_method(D_METHOD("set_click_through", "hwnd", "on"), &KeyCountWindow::set_click_through);

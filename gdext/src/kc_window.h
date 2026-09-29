@@ -50,12 +50,12 @@ public:
 };
 
 } // namespace godot
-
+// >>> zone:human
 namespace kc_ext {
 
 // 启动时记录「宠物出现之前谁持有键盘」。由模块初始化（kc_module.cpp）在
 // MODULE_INITIALIZATION_LEVEL_SCENE 阶段调用；**必须早于**任何 restore_prev_foreground。
 // 见 kc_window.cpp 里的长注释（为什么不能直接 GetForegroundWindow）。
 void remember_prev_foreground();
-
+// <<<
 } // namespace kc_ext
