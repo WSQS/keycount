@@ -662,6 +662,43 @@ else
   ok "scope=nvim 不扫 npm / scope=pi 不扫 nvim / all 含两者；非法 scope 退 2"
 fi
 
+# ---------- ㉚ 切文件时自动保存（kc/autosave） ----------
+echo "########## ㉚ autosave：切文件存盘 / 退出不存（:q! 语义）/ :KcAutoSave off 关掉"
+as="$nook/.nvim/xdg/as"; mkdir -p "$as"; A="$as/a1.txt"; B="$as/a2.txt"
+printf 'orig\n' > "$A"; printf 'two\n' > "$B"
+cat > "$as/a.lua" <<'LUA'
+local d = vim.fn.getcwd() .. "/sopho-nook/.nvim/xdg/as"
+vim.cmd("edit " .. vim.fn.fnameescape(d .. "/a1.txt"))
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "SAVED-BY-AUTOSAVE" })
+vim.cmd("edit " .. vim.fn.fnameescape(d .. "/a2.txt"))
+LUA
+cat > "$as/b.lua" <<'LUA'
+local d = vim.fn.getcwd() .. "/sopho-nook/.nvim/xdg/as"
+vim.cmd("edit " .. vim.fn.fnameescape(d .. "/a1.txt"))
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "SHOULD-NOT-PERSIST" })
+LUA
+cat > "$as/c.lua" <<'LUA'
+local d = vim.fn.getcwd() .. "/sopho-nook/.nvim/xdg/as"
+vim.cmd("edit " .. vim.fn.fnameescape(d .. "/a1.txt"))
+vim.api.nvim_buf_set_lines(0, 0, -1, false, { "OFF-SHOULD-NOT-SAVE" })
+vim.cmd("KcAutoSave off")
+vim.cmd("edit " .. vim.fn.fnameescape(d .. "/a2.txt"))
+LUA
+timeout 40 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/as/a.lua" +qa! >/dev/null 2>&1
+_a=$(cat "$A")
+printf 'orig\n' > "$A"
+timeout 40 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/as/b.lua" +qa! >/dev/null 2>&1
+_b=$(cat "$A")
+printf 'orig2\n' > "$A"
+timeout 40 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/as/c.lua" +qa! >/dev/null 2>&1
+_c=$(cat "$A")
+rm -f "$as/a.lua" "$as/b.lua" "$as/c.lua"
+if [ "$_a" = "SAVED-BY-AUTOSAVE" ] && [ "$_b" = "orig" ] && [ "$_c" = "orig2" ]; then
+  ok "切文件→存；退出→不存（:q! 仍是丢弃）；:KcAutoSave off→不存"
+else
+  no "autosave 行为不对：切换=[$_a] 退出=[$_b] 关闭=[$_c]"
+fi
+
 rm -rf "$_bat"
 
 echo

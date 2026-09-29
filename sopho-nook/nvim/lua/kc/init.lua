@@ -79,6 +79,9 @@ function M.setup(_opts)
   -- C/C++ 保存时格式化（clang-format）。找不到就出声一次，不假装格式化过。
   require("kc.format").setup()
 
+  -- 切走一个缓冲区前先存盘（否则改过的内容只活在内存里，别的 nvim 会看到它的 swap）。
+  require("kc.autosave").setup()
+
   vim.api.nvim_create_user_command("KcPick", function() M.pick() end,
     { desc = "kc: 挑一个文件编辑" })
   vim.api.nvim_create_user_command("KcHelp", function() require("kc.help").show() end,

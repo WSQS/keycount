@@ -59,6 +59,7 @@ sopho-nook/bin/check-isolation --scope nvim -- <命令>  # 判据：证明它没
 | 18 | **区域标记（human / ai）P1：只读检查器**：`.zonecheck.json` + `tools/zonecheck/`（仓库根）。标记成对、纯栈配对、可嵌套；`check` / `stats` / `judge` | 判据 ㉖（17 条单测 + 仓库 `check` 0 错且 covered>0 + **CLI `judge`：actor=ai 碰 human → deny/rc=1**） | P1 已验；P2（nvim 上色）/P3（门）见下 |
 | 19 | **区域在编辑器里可见（P2）**：`:KcZoneStatus` / `:KcZoneCheck` / `:KcZoneJudge` / `:KcZoneRefresh` / `:KcZoneToggleLegacy`；区域上色 + sign + 行尾虚文本 | 判据 ㉗（`plan()` 的行映射/空区域/嵌套 + 真跑 `check`/`judge`/`refresh`） | 已验（headless）；真终端观感见“已知未验” |
 | 20 | **C/C++ 保存时格式化**：`clang-format`（仓库根 `.clang-format`），`BufWritePre` 触发；`:KcFormat` 手动 | 判据 ㉘（候选解析 + 真跑 `:w` 格式化 + **标记不被弄坏**） | 已验；代价见“已知未验” |
+| 21 | **切文件时自动保存**：`BufLeave` 时把改过的缓冲区写盘（只存“有名字、改过、可写”的普通文件）；**退出不存**（保住 `:q!` 是“丢弃”） | 判据 ㉚（切文件→存 / 退出→不存 / `:KcAutoSave off`→不存） | 已验 |
 
 ## 这个项目在这个 nook 里加了什么
 
@@ -78,6 +79,7 @@ sopho-nook/bin/check-isolation --scope nvim -- <命令>  # 判据：证明它没
 | `nvim/lua/kc/lsp.lua` | C/C++ 的 LSP：解析 clangd（PATH → VS 2022 → LLVM，且**实跑 `--version` 自检**才采用 —— VS 里 x64 与 ARM64 并存，ARM64 那份在 x64 上起不来）、`vim.lsp.config/enable` 零插件启动；编译参数走 `gdext/compile_commands.json` |
 | `nvim/lua/kc/zone.lua` | 区域标记在编辑器里**可见**（软事：只上色/只提示，**从不拦人**）。`covered` 由检查器回答，自己不维护扩展名清单。纯函数 `plan()` 管“内容行 → extmark 行”的映射（判据 ㉗） |
 | `nvim/lua/kc/format.lua` + **`.clang-format`（仓库根）** | C/C++ 保存时格式化（`BufWritePre`）。风格来自仓库根 `.clang-format`（**反推自现有代码**）。不用 clangd 的 formatting：`BufWritePre` 时 clangd 可能还没挂上。撞 VS 的 ARM64 `clang-format` 会在 spawn 时抛错 → 已 x64 优先 + 实跑自检 + **pcall**（格式化失败绝不阻断保存） |
+| `nvim/lua/kc/autosave.lua` | 切走缓冲区前先存盘。因为 nvim 默认把改过的缓冲区留在内存里，切文件不写盘 → 别的 nvim/工具会看到它的 swap（`W325`）。**退出不存**（`:q!` 仍是丢弃）；存盘失败出声；`:KcAutoSave on|off` 可关 |
 | **`tools/zonecheck/`（仓库根，不是本 nook）** | 区域标记（human/ai）的只读检查器（stdlib Python，`uv run --no-project python`）。P1：标记解析 + `check`/`stats`/`judge`。目标 = **目的 A（保护）**：人标的 human 区，agent 机械地改不了（机制见判据 ㉖）。P2（nvim 上色）/P3（pi 门 + `pi-zoned`）待做 |
 | `agents/ROLE.md` | **角色说明**（政策，进 git）。由 `bin/pi-local` 用 `--append-system-prompt` 指到它 |
 | `agents/skills/keycount-verification/` | 改完东西后**怎么按层验证**（核心自检 → 扩展编译 → 集成 → 不抢焦点 → 落盘 → 单实例） |
@@ -118,6 +120,7 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
 #   uv run --no-project python tools/zonecheck/zonecheck.py check
 #   :KcZoneStatus / :KcZoneCheck / :KcZoneJudge / :KcZoneRefresh / :KcZoneToggleLegacy
 #   :KcFormat     手动格式化当前 C/C++ 文件（保存时也会自动做）
+#   :KcAutoSave on|off|status   切文件时自动保存（默认 on）
 #   :KcInfo     打印推导出来的路径（调试 nook 自己用）
 ```
 
@@ -143,6 +146,9 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
   （**纯空白**）；续行风格与旧手写不同（旧的是“对齐括号再取 tab 停位”，clang-format 复现不了，
   见 `.clang-format` 里的注释）。且格式化**可能重排 human 区的空白** —— 那是人自己保存触发的工具行为，
   不是“agent 碰了 human”。
+- **autosave 与格式化是连锁的**：`BufLeave`（切文件）→ 存盘 → `BufWritePre` → clang-format。
+  所以“**切走**一个 C/C++ 文件”也会顺手把它格式化 —— 这是“保存就该格式化”的自然结果，
+  但你要知道它发生在这里（不想这样就可以 `:KcAutoSave off`）。
 - **subagent 已验到“单发端到端”**：判据 ㉔ 验注册；另外实跑过一次（父进程只开 `subagent`，让它派 scout 去数 `native/*.cpp`）。
   **没验的**：并行（`tasks=[...]`）与链式（`chain=[...]`）两种模式；以及示例 agent 的 prompt 质量（那是上游的，没改）。
   复跑：`sopho-nook/bin/pi-local --no-session --no-context-files --tools subagent --print '用 subagent 派 agent="scout" 数 native/ 下的 .cpp 文件'`
