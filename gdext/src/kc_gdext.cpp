@@ -470,7 +470,7 @@ bool KeyCountGuard::is_held() const {
 }
 
 // ============================== 库初始化 ==============================
-
+// >>> zone:human
 static void initialize_keycount_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
 		return;
@@ -500,3 +500,4 @@ GDExtensionBool GDE_EXPORT keycount_library_init(
 	return init_obj.init();
 }
 }
+// <<<
