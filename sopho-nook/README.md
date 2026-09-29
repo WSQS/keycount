@@ -55,6 +55,7 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | 14 | **nook 自己的 Lua 热更**：`<leader>r` 重载 `nvim/lua/kc/**`，改完不必重启 nvim | 判据 ㉒（只清 `kc.*`、缓存真的清掉、键位重注册、**失败返回 false 不假装成功**） | 已验（改 `init.lua` 仍需重启，见下） |
 | 15 | **外部改动自动重载**：pi（或任何外部进程）改了盘上的文件，nvim 缓冲区自己跟上 | 判据 ㉓（纯函数 `decide()` 的 5 种边界 + 真 `uv_fs_event`：干净自动重载、**脏缓冲区绝不覆盖**） | 已验（headless + 真文件）；真终端观感见“已知未验” |
 | 16 | **subagent 工具**：把任务派给隔离子进程的专用 agent（scout / planner / reviewer / worker），支持单发 / 并行 / 链式 | 判据 ㉔（SDK `getActiveToolNames()` 真验注册）+ **端到端实跑**：父进程只开 `subagent`，`agent="scout"` 拿回`native/` 的文件清单（自己无读文件的工具，答案只能来自子进程） | 已验（单发）；并行/链式见“已知未验” |
+| 17 | **C/C++ 的 LSP（clangd，零插件）**：补全 / 跳转定义 / hover，用 nvim 内建 LSP 客户端 | 判据 ㉕（纯函数候选解析 + **真起一个 clangd client**，确认 completion/definition 能力） | 已验（headless 起 client）；真终端按键见“已知未验” |
 
 ## 这个项目在这个 nook 里加了什么
 
@@ -71,6 +72,7 @@ sopho-nook/bin/check-isolation -- <命令>  # 判据：证明上面这些没写�
 | `nvim/lua/kc/paths.lua` | nook / repo / 各子目录的路径**只在这里推导一次** |
 | `nvim/lua/kc/reload.lua` | `<leader>r`：清掉 `package.loaded` 里的 `kc.*` 再 `setup()`，热更 nook 自己的 Lua。**失败如实报错、返回 false**；只认 `kc.*`，不碰内置与别的插件；**不重跑 `init.lua`**（改它仍要重启） |
 | `nvim/lua/kc/watch.lua` | 外部改动自动重载：`uv_fs_event` 盯「已打开文件所在目录」→ 去抖 150ms → 纯函数 `decide()` 判决（干净=读盘；**脏缓冲=只警告不覆盖**；文件没了=保留缓冲）。状态放 `_G`，所以 `<leader>r` 之后 watch 逻辑也是新的 |
+| `nvim/lua/kc/lsp.lua` | C/C++ 的 LSP：解析 clangd（PATH → VS 2022 → LLVM，且**实跑 `--version` 自检**才采用 —— VS 里 x64 与 ARM64 并存，ARM64 那份在 x64 上起不来）、`vim.lsp.config/enable` 零插件启动；编译参数走 `gdext/compile_commands.json` |
 | `agents/ROLE.md` | **角色说明**（政策，进 git）。由 `bin/pi-local` 用 `--append-system-prompt` 指到它 |
 | `agents/skills/keycount-verification/` | 改完东西后**怎么按层验证**（核心自检 → 扩展编译 → 集成 → 不抢焦点 → 落盘 → 单实例） |
 | `tools/criteria.sh` | 这一份的判据 runner：**条数以它的汇总行为准**，不在文档里写死 |
@@ -102,6 +104,10 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
 #   <leader>g   lazygit
 #   <leader>r   重载 nook 自己的 Lua（改 nvim/lua/kc/** 后）
 #   subagent(...)  派子任务（scout/planner/reviewer/worker；注册见判据 ㉔）
+#   :KcLsp        看 clangd 的路径与已连接的 client 数
+# 给 clangd 用的编译数据库（不进 git；改过构建命令后重跑）：
+#   cd gdext && scons platform=windows target=template_debug api_version=4.7 compiledb
+#   C/C++ 键：gd=跳转定义  K=hover  grn=重命名  grr=引用  gra=代码动作  gO=文档符号  <C-x><C-o>=补全
 #   :KcInfo     打印推导出来的路径（调试 nook 自己用）
 ```
 
@@ -113,6 +119,9 @@ sopho-nook/tools/criteria.sh            # 跑这个 nook 的全部判据
   用它"看"终端渲染只会拿到空 buffer（那边实测踩过）。
 - **外部改动自动重载（watch）**：机制在 headless 下用**真文件 + 真 `uv_fs_event`** 验过（判据 ㉓），
   但"真终端里边打字边被 pi 改文件"的观感没人看过 —— 与上面那条同一类已知未验。
+- **clangd LSP 只验到“client 起来了 + 能力在”**：判据 ㉕ 真起了一个 clangd client 并确认 completion/definition 可用；
+  但**没人在真终端里按过补全（`<C-x><C-o>`）或跳转（`gd`）**。且补全质量取决于
+  `gdext/compile_commands.json`（不进 git，要自己 `scons ... compiledb` 生成；没有它 clangd 仍会挂上，只是用回退参数）。
 - **subagent 已验到“单发端到端”**：判据 ㉔ 验注册；另外实跑过一次（父进程只开 `subagent`，让它派 scout 去数 `native/*.cpp`）。
   **没验的**：并行（`tasks=[...]`）与链式（`chain=[...]`）两种模式；以及示例 agent 的 prompt 质量（那是上游的，没改）。
   复跑：`sopho-nook/bin/pi-local --no-session --no-context-files --tools subagent --print '用 subagent 派 agent="scout" 数 native/ 下的 .cpp 文件'`

@@ -13,6 +13,10 @@ gdext/api/extension_api.json
 # 扩展编出来的 dll（pet 里那份是拷贝，由 run-pet.ps1 或 scons 生成）
 pet/addons/keycount/bin/
 
+# clangd / LSP 产物：compile_commands.json 由 `scons ... compiledb` 生成，.cache 是 clangd 的索引
+gdext/compile_commands.json
+gdext/.cache/
+
 # 独立验证 exe
 native/test_hook.exe
 native/test_store.exe

@@ -70,6 +70,9 @@ function M.setup(_opts)
   -- 幂等；且会用当前代码顶掉旧回调，所以 <leader>r 之后 watch 逻辑也是新的。
   require("kc.watch").start()
 
+  -- C/C++ 的 LSP（clangd，零插件）。找不到 clangd 就静默不启（:KcLsp 可查）。
+  require("kc.lsp").setup()
+
   vim.api.nvim_create_user_command("KcPick", function() M.pick() end,
     { desc = "kc: 挑一个文件编辑" })
   vim.api.nvim_create_user_command("KcHelp", function() require("kc.help").show() end,
@@ -83,6 +86,12 @@ function M.setup(_opts)
   vim.api.nvim_create_user_command("KcWatch", function()
     vim.notify(require("kc.watch").status(), vim.log.levels.INFO, { title = "kc watch" })
   end, { desc = "kc: 外部改动自动重载的现状" })
+  vim.api.nvim_create_user_command("KcLsp", function()
+    local lsp = require("kc.lsp")
+    local clients = #vim.lsp.get_clients({ name = "clangd" })
+    vim.notify(("kc lsp: clangd=%s\n已连接 client=%d"):format(lsp.clangd() or "(未找到)", clients),
+      vim.log.levels.INFO, { title = "kc lsp" })
+  end, { desc = "kc: clangd LSP 现状" })
   vim.api.nvim_create_user_command("KcInfo", function()
     vim.notify(table.concat(M.info_lines(), "\n"), vim.log.levels.INFO, { title = "kc info" })
   end, { desc = "kc: 打印推导出来的路径（调试 nook 自己用）" })

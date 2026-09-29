@@ -441,6 +441,34 @@ else
   no "启动器没有把 subagent 扩展接上"
 fi
 
+# ---------- ㉕ clangd LSP（零插件） ----------
+echo "########## ㉕ clangd：候选解析（可运行才算）+ 真起一个 client 并确认能力"
+cat > "$nook/.nvim/xdg/lsp_check.lua" <<'LUA'
+local lsp = require("kc.lsp")
+local bad = 0
+local function eq(a, b, m) if a ~= b then bad = bad + 1; io.write(" BAD " .. m .. "\n") end end
+eq(lsp.pick({ "definitely_not_here_xyz" }), nil, "pick-none")
+eq(lsp.pick({}), nil, "pick-empty")
+eq(lsp.pick({ "definitely_not_here_xyz", "cmd.exe" }, function() return true end) ~= nil, true, "pick-second")
+eq(lsp.pick({ "cmd.exe" }, function() return false end), nil, "pick-runnable-rejects")
+io.write("clangd=" .. tostring(lsp.clangd()) .. "\n")
+vim.cmd("edit " .. vim.fn.fnameescape(vim.fn.getcwd() .. "/native/kc_hook.cpp"))
+local ok = vim.wait(60000, function() return #vim.lsp.get_clients({ name = "clangd" }) > 0 end, 250)
+local cls = vim.lsp.get_clients({ name = "clangd" })
+local cap = (cls[1] and cls[1].server_capabilities) or {}
+if not ok then bad = bad + 1; io.write(" BAD no-client\n") end
+if cap.completionProvider == nil then bad = bad + 1; io.write(" BAD no-completion\n") end
+if cap.definitionProvider ~= true then bad = bad + 1; io.write(" BAD no-definition\n") end
+if vim.fn.maparg("gd", "n") == "" then bad = bad + 1; io.write(" BAD no-gd-map\n") end
+io.write("clients=" .. #cls .. " bad=" .. bad)
+LUA
+out=$(timeout 120 "$NVIM" --headless -c "luafile sopho-nook/.nvim/xdg/lsp_check.lua" +qa! 2>&1); rc=$?
+case "$out" in
+  *"bad=0"*) ok "$(printf '%s' "$out" | grep -o 'clients=[0-9]* bad=0')（候选解析边界 + 真 clangd client 能力：补全/跳转）" ;;
+  *"clangd=nil"*) sk "没找到可运行的 clangd（跳过 LSP 集成）" ;;
+  *) no "clangd LSP 判据失败（rc=$rc）：$out" ;;
+esac
+
 echo
 echo "########## 汇总: PASS=$pass FAIL=$failed SKIP=$skip"
 [ "$failed" -eq 0 ]
