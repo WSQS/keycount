@@ -217,7 +217,7 @@ test_hook.exe 12  （窗口无焦点）  →  按下 9 下，抬起 9 下，丢�
 
 | 产物 | 说明 |
 |---|---|
-| `gdext/` | 扩展源码（`SConstruct` + `src/kc_gdext.h/.cpp`），构建：`scons platform=windows target=template_debug api_version=4.7` |
+| `gdext/` | 扩展源码（`SConstruct` + `src/kc_{hook_ext,window,store_ext,guard}.{h,cpp}` + `src/kc_module.cpp`），构建：`scons platform=windows target=template_debug api_version=4.7` |
 | `gdext/bin/*.dll` | `keycount.windows.template_debug/release.x86_64.dll`，约 350-370KB |
 | `pet/` | Godot 工程（`project.godot` / `main.tscn` / `pet.gd`），扩展装在 `pet/addons/keycount/` |
 | `agent-test/run-pet.ps1` | **启动器 —— 必须用它启动**，原因见下 |

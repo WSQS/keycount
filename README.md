@@ -33,7 +33,11 @@ native/          平台核心，不依赖 Godot
 thirdparty/
   sqlite/          SQLite amalgamation 3.53.4 + 版本固定记录 PIN.txt
 gdext/           GDExtension 接线层
-  src/kc_gdext.h/.cpp   KeyCountHook / KeyCountWindow / KeyCountStore
+  src/kc_hook_ext.*     KeyCountHook（native 钩子的接线）
+  src/kc_window.*       KeyCountWindow（Win32 窗口样式）
+  src/kc_store_ext.*    KeyCountStore（SQLite 接线）
+  src/kc_guard.*        KeyCountGuard（单实例锁）
+  src/kc_module.cpp     库初始化（注册上面四个类）
   SConstruct            构建脚本（含 sqlite3.c）
   api/                  从本机 Godot dump 出来的 extension_api.json
 tools/
