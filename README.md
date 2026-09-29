@@ -1,4 +1,4 @@
-# keycount — 桌面宠物 + 每日键盘计数
+keycount — 桌面宠物 + 每日键盘计数
 
 一只住在桌面上的宠物，顺便把你「今天敲了多少下键盘、分别是哪些键、现在打多快」表演出来。
 本地存储，不外传，**只存计数不存内容**。
@@ -42,13 +42,13 @@ pet/             Godot 工程
   project.godot         透明置顶 + no_focus + gl_compatibility
   pet.gd                占位宠物 + 状态机 + 落盘口径（什么算一天/flush 频率）
   addons/keycount/      扩展的 .gdextension + 编好的 dll
-evidence/        验证工具（可重跑）
-  run-pet.ps1           **启动器 —— 必须用它启动宠物**
+agent-test/      运行/验证工具箱（可重跑；见 agent-test/README.md）
+  run-pet.ps1           **启动器 —— 启动宠物必须用它**
   inject3.ps1           往自测窗口注入按键，验证全局抓键
   fg2.ps1               查「键盘到底在谁手上」（GetGUIThreadInfo）
   drag-test.ps1         模拟真实拖拽
   screenshot.ps1/crop2.ps1  截图与裁剪
-spike-godot/     Godot 透明窗口实测工程（Vulkan 黑方块 vs OpenGL 正常的原始证据）
+  spike-godot/          Godot 透明窗口实测工程（Vulkan 黑方块 vs OpenGL 正常的原始证据）
 SPEC.md          全部实测结论与踩坑记录
 ```
 
@@ -87,7 +87,7 @@ g++ -std=c++17 -O2 -Wall -Wextra -static -static-libgcc -static-libstdc++ \
 godot --headless --editor --quit --path pet
 
 # 启动（必须用启动器 —— 它会记录「宠物出现之前谁持有键盘」，传给宠物用来把焦点还回去）
-powershell -File evidence/run-pet.ps1
+powershell -File agent-test/run-pet.ps1
 
 # 看数据（宠物没在跑也能看；直读同一个 SQLite 库）
 uv run --no-project python tools/keycount.py today

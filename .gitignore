@@ -20,8 +20,8 @@ native/sqlite3.o
 native/test_store.db*
 
 # C# 探针（早前验证钩子用的，保留源码即可）
-evidence/cs-probe/bin/
-evidence/cs-probe/obj/
+agent-test/cs-probe/bin/
+agent-test/cs-probe/obj/
 
 # ---- Godot ----
 pet/.godot/
@@ -30,10 +30,10 @@ export_presets.cfg
 
 # ---- 运行产物：日志与原始全屏截图（可随时重新生成）----
 *.log
-spike-godot/stdout*.txt
-spike-godot/godot-stdout.txt
-spike-godot/run*.log
-spike-godot/full-*.png
+agent-test/spike-godot/stdout*.txt
+agent-test/spike-godot/godot-stdout.txt
+agent-test/spike-godot/run*.log
+agent-test/spike-godot/full-*.png
 shots/full-*.png
 pet/run.log
 pet/stdout*.txt

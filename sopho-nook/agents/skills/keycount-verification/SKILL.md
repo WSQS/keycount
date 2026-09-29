@@ -45,7 +45,7 @@ cp bin/*.dll ../pet/addons/keycount/bin/
 ### 3. 集成（必须用启动器）
 
 ```bash
-powershell -File evidence/run-pet.ps1     # 或 Windows 上直接跑那一行
+powershell -File agent-test/run-pet.ps1     # 或 Windows 上直接跑那一行
 ```
 
 **不要直接跑 Godot**：Godot 在 GDExtension 初始化**之前**就创建并激活了主窗口，
@@ -57,7 +57,7 @@ powershell -File evidence/run-pet.ps1     # 或 Windows 上直接跑那一行
 ### 4. 不抢焦点（这条最容易假通过）
 
 ```bash
-powershell -File evidence/fg2.ps1
+powershell -File agent-test/fg2.ps1
 ```
 
 **判据**：输出的 `hwndFocus` **不能是** `keycount pet (DEBUG)`，
@@ -69,7 +69,7 @@ powershell -File evidence/fg2.ps1
 ### 5. 全局抓键 + 落盘
 
 ```bash
-powershell -File evidence/inject3.ps1          # 往自测窗口注入 9 下
+powershell -File agent-test/inject3.ps1          # 往自测窗口注入 9 下
 uv run --no-project python tools/keycount.py today
 ```
 

@@ -19,7 +19,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)   # evidence/ 的上一级
+$root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)   # agent-test/ 的上一级
 if (-not $Project) { $Project = Join-Path $root "pet" }
 $procName = Split-Path -Leaf $Godot                              # godot.windows.opt.tools.64.exe
 

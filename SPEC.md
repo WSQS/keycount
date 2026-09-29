@@ -72,8 +72,8 @@ Live2D Cubism 原生 FFI 绑定、全局输入捕获、托盘、开机自启（`
 Node 那条我一度判为有风险（「Node 25 = ABI 141，预编译不覆盖」）——**这个判断是错的**：
 它是 napi-rs 模块，N-API ABI 稳定，预编译产物在 Node 25 上加载并收到按键均正常。
 
-验证方式：程序自己弹窗口夺焦，用 `SendKeys` 往**它自己**里打字（`evidence/inject.ps1`），
-没有向其他任何窗口注入按键。证据脚本在 `evidence/`。
+验证方式：程序自己弹窗口夺焦，用 `SendKeys` 往**它自己**里打字（`agent-test/inject.ps1`），
+没有向其他任何窗口注入按键。证据脚本在 `agent-test/`。
 
 ### 与栈无关的硬限制
 
@@ -82,7 +82,7 @@ Node 那条我一度判为有风险（「Node 25 = ABI 141，预编译不覆盖�
 
 ## Godot 路线的实测结果（2026-09-28，本机 stock Godot 4.7.2 Steam 版）
 
-做了个最小测试工程 `spike-godot/`：420×420、borderless、always_on_top、transparent、
+做了个最小测试工程 `agent-test/spike-godot/`：420×420、borderless、always_on_top、transparent、
 per_pixel_transparency/allowed，画一个会呼吸的圆，然后全屏截图对比。
 
 | 渲染器 | 结果 |
@@ -91,7 +91,7 @@ per_pixel_transparency/allowed，画一个会呼吸的圆，然后全屏截图�
 | **OpenGL3 / Compatibility** | ✅ 透明正常：圆浮在桌面之上，四角能看到后面的编辑器文字和终端。 |
 
 → 这台机器上做透明桌宠**必须用 Compatibility 渲染器**（或去 NVIDIA 控制面板把 Vulkan present method 改成
-Native —— 那是机器级设置，会影响别的程序）。截图证据：`spike-godot/crop-vulkan.png`、`crop-opengl3.png`。
+Native —— 那是机器级设置，会影响别的程序）。截图证据：`agent-test/spike-godot/crop-vulkan.png`、`crop-opengl3.png`。
 
 ### 全局按键：实测不合格
 
@@ -220,7 +220,7 @@ test_hook.exe 12  （窗口无焦点）  →  按下 9 下，抬起 9 下，丢�
 | `gdext/` | 扩展源码（`SConstruct` + `src/kc_gdext.h/.cpp`），构建：`scons platform=windows target=template_debug api_version=4.7` |
 | `gdext/bin/*.dll` | `keycount.windows.template_debug/release.x86_64.dll`，约 350-370KB |
 | `pet/` | Godot 工程（`project.godot` / `main.tscn` / `pet.gd`），扩展装在 `pet/addons/keycount/` |
-| `evidence/run-pet.ps1` | **启动器 —— 必须用它启动**，原因见下 |
+| `agent-test/run-pet.ps1` | **启动器 —— 必须用它启动**，原因见下 |
 
 ### 实测证据
 
@@ -300,7 +300,7 @@ ALIVE ... focused=false focus_true_frames=0 input_keys=0 dropped=0   ← 全程�
 
 ```
 # 启动宠物（必须用启动器，见「抢焦点这件事打了三仗」）
-powershell -File evidence/run-pet.ps1
+powershell -File agent-test/run-pet.ps1
 
 # 命令行报表（直读同一个库，宠物没跑也能用）
 uv run --no-project python tools/keycount.py today
