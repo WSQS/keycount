@@ -21,20 +21,27 @@ NVIM="$B/nvim-local"
 # 这个 nvim 的 -c 'lua ...' 需要把 lua 当参数传，用个短包装免得引号互相打架
 nv() { "$NVIM" --headless -c "$1" +q 2>&1; }
 
-# ---------- ① / ② 隔离 ----------
-echo "########## ① bin/nvim-local 不碰工程外（Windows 侧约 60 秒）"
-out=$("$B/check-isolation" -- "$NVIM" --headless +q 2>&1 || true)
+# ---------- ① / ② 隔离（并发跑：check-isolation 每次要拍两遍全局目录快照，很贵） ----------
+# 并发是安全的：每个实例自己的 before/after 都夹着**它自己的**被测命令；
+# 并发最多带来“别人的写入也算到我头上”的**误报**，不会让真泄露漏掉。
+echo "########## ① / ② check-isolation（并发；工程外零差异）"
+_iso1=$(mktemp); _iso2=$(mktemp)
+"$B/check-isolation" -- "$NVIM" --headless +q >"$_iso1" 2>&1 &
+_iso_p1=$!
+"$B/check-isolation" -- "$B/pi-local" --version >"$_iso2" 2>&1 &
+_iso_p2=$!
+wait "$_iso_p1"; wait "$_iso_p2"
+out=$(cat "$_iso1")
 case "$out" in
-  *PASS*) ok "check-isolation -- bin/nvim-local（工程外零差异）" ;;
-  *) no "隔离失败"; printf '%s\n' "$out" | tail -6 | sed 's/^/     /' ;;
+  *PASS*) ok "① bin/nvim-local（工程外零差异）" ;;
+  *) no "① 隔离失败"; printf '%s\n' "$out" | tail -6 | sed 's/^/     /' ;;
 esac
-
-echo "########## ② bin/pi-local 不碰工程外"
-out=$("$B/check-isolation" -- "$B/pi-local" --version 2>&1 || true)
+out=$(cat "$_iso2")
 case "$out" in
-  *PASS*) ok "check-isolation -- bin/pi-local（工程外零差异）" ;;
-  *) no "隔离失败"; printf '%s\n' "$out" | tail -6 | sed 's/^/     /' ;;
+  *PASS*) ok "② bin/pi-local（工程外零差异）" ;;
+  *) no "② 隔离失败"; printf '%s\n' "$out" | tail -6 | sed 's/^/     /' ;;
 esac
+rm -f "$_iso1" "$_iso2"
 
 # ---------- ③ 五个 stdpath ----------
 echo "########## ③ nvim 五个 stdpath 全在 sopho-nook/ 内"
