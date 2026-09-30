@@ -1,3 +1,4 @@
+// zone:human
 // kc_module.cpp —— GDExtension 入口：注册四个类 + 库初始化/反初始化
 #include "kc_guard.h"
 #include "kc_hook_ext.h"
@@ -8,7 +9,6 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
-// >>> zone:human
 using namespace godot;
 
 static void initialize_keycount_module(ModuleInitializationLevel p_level) {
@@ -40,4 +40,3 @@ GDExtensionBool GDE_EXPORT keycount_library_init(
 	return init_obj.init();
 }
 }
-// <<<
