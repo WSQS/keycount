@@ -25,6 +25,12 @@ HWND to_hwnd(int64_t p) {
 	return reinterpret_cast<HWND>(static_cast<intptr_t>(p));
 }
 
+// 反方向：HWND → 交给 GDScript 的整数（Godot 的 int 是 int64_t）。
+// 两步 cast 各自的职责与 to_hwnd 完全对称：先当整数位模式（reinterpret），再改数值宽度（static）。
+int64_t to_int64(HWND h) {
+	return static_cast<int64_t>(reinterpret_cast<intptr_t>(h));
+}
+
 // 改扩展样式必须跟一次 SWP_FRAMECHANGED 才会真正生效
 void refresh_frame(HWND h) {
 	SetWindowPos(h, nullptr, 0, 0, 0, 0,
@@ -131,7 +137,7 @@ void KeyCountWindow::_bind_methods() {
 
 int64_t KeyCountWindow::get_prev_foreground() const {
 #ifdef _WIN32
-	return static_cast<int64_t>(reinterpret_cast<intptr_t>(g_prev_foreground));
+	return to_int64(g_prev_foreground);
 #else
 	return 0;
 #endif
@@ -139,7 +145,7 @@ int64_t KeyCountWindow::get_prev_foreground() const {
 
 int64_t KeyCountWindow::get_foreground() const {
 #ifdef _WIN32
-	return static_cast<int64_t>(reinterpret_cast<intptr_t>(GetForegroundWindow()));
+	return to_int64(GetForegroundWindow());
 #else
 	return 0;
 #endif
