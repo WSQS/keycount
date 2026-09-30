@@ -164,5 +164,64 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class FileMarkerTest(unittest.TestCase):
+    def test_first_line_declares_base(self):
+        r = zc.parse_text("# zone:human\nint x = 1\nint y = 2\n", "#")
+        self.assertEqual(r["base"], "human")
+        self.assertEqual(r["errors"], [])
+        self.assertEqual(r["counts"], {"human": 2, "ai": 0, "legacy": 0, "markers": 1})
+        self.assertEqual(r["regions"], [])
+        self.assertEqual(r["unmarked"], [])          # 没有 legacy 行
+
+    def test_base_with_inner_ai_region(self):
+        r = zc.parse_text("# zone:human\na\n# >>> zone:ai\nb\n# <<<\nc\n", "#")
+        self.assertEqual(r["base"], "human")
+        self.assertEqual(r["counts"], {"human": 2, "ai": 1, "legacy": 0, "markers": 3})
+        self.assertEqual(r["regions"], [{"zone": "ai", "begin": 4, "end": 4, "depth": 0}])
+
+    def test_marker_not_first_line_warns_and_does_not_count(self):
+        r = zc.parse_text("a\n# zone:human\nb\n", "#")
+        self.assertEqual(r["base"], "legacy")
+        self.assertEqual([w["code"] for w in r["warnings"]], ["file-marker-not-first-line"])
+        self.assertEqual(r["counts"], {"human": 0, "ai": 0, "legacy": 3, "markers": 0})
+
+    def test_prefix_follows_language(self):
+        r = zc.parse_text("-- zone:ai\nx = 1\n", "--")
+        self.assertEqual(r["base"], "ai")
+        self.assertEqual(r["errors"], [])
+
+
+class FileMarkerJudgeTest(unittest.TestCase):
+    def _judge(self, files, rel, new_text, actor="ai", policy=True):
+        root = make_root(files)
+        cfg = zc.load_config(root)
+        self.assertTrue(zc.covered(rel, cfg), f"{rel} 不在区域纪律内")
+        return zc.judge(root, cfg, rel, new_text, actor, policy)
+
+    def test_ai_touching_base_human_denies(self):
+        base = "# zone:human\nx = 1\ny = 2\n"
+        res, code = self._judge({"a.py": base}, "a.py", base.replace("x = 1", "x = 2"))
+        self.assertEqual(res["decision"], "deny")
+        self.assertEqual(code, 1)
+        self.assertIn("human-touch", [v["code"] for v in res["violations"]])
+
+    def test_inner_ai_block_inside_base_human_allows(self):
+        base = "# zone:human\nx = 1\n# >>> zone:ai\ny = 1\n# <<<\n"
+        res, code = self._judge({"a.py": base}, "a.py", base.replace("y = 1", "y = 2"))
+        self.assertEqual(res["decision"], "allow")
+        self.assertEqual(code, 0)
+
+    def test_ai_adding_file_marker_denies(self):
+        res, _ = self._judge({"a.py": "x = 1\n"}, "a.py", "# zone:human\nx = 1\n")
+        self.assertEqual(res["decision"], "deny")
+        self.assertIn("marker-edit", [v["code"] for v in res["violations"]])
+
+    def test_human_may_edit_base_human(self):
+        base = "# zone:human\nx = 1\n"
+        res, code = self._judge({"a.py": base}, "a.py", base.replace("x = 1", "x = 2"), actor="human")
+        self.assertEqual(res["decision"], "allow")
+        self.assertEqual(code, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -56,7 +56,7 @@ sopho-nook/bin/check-isolation --scope nvim -- <命令>  # 判据：证明它没
 | 15 | **外部改动自动重载**：pi（或任何外部进程）改了盘上的文件，nvim 缓冲区自己跟上 | 判据 ㉓（纯函数 `decide()` 的 5 种边界 + 真 `uv_fs_event`：干净自动重载、**脏缓冲区绝不覆盖**） | 已验（headless + 真文件）；真终端观感见“已知未验” |
 | 16 | **subagent 工具**：把任务派给隔离子进程的专用 agent（scout / planner / reviewer / worker），支持单发 / 并行 / 链式 | 判据 ㉔（SDK `getActiveToolNames()` 真验注册）+ **端到端实跑**：父进程只开 `subagent`，`agent="scout"` 拿回`native/` 的文件清单（自己无读文件的工具，答案只能来自子进程） | 已验（单发）；并行/链式见“已知未验” |
 | 17 | **C/C++ 的 LSP（clangd，零插件）**：补全 / 跳转定义 / hover，用 nvim 内建 LSP 客户端 | 判据 ㉕（纯函数候选解析 + **真起一个 clangd client**，确认 completion/definition 能力） | 已验（headless 起 client）；真终端按键见“已知未验” |
-| 18 | **区域标记（human / ai）P1：只读检查器**：`.zonecheck.json` + `tools/zonecheck/`（仓库根）。标记成对、纯栈配对、可嵌套；`check` / `stats` / `judge` | 判据 ㉖（17 条单测 + 仓库 `check` 0 错且 covered>0 + **CLI `judge`：actor=ai 碰 human → deny/rc=1**） | P1 已验；P2（nvim 上色）/P3（门）见下 |
+| 18 | **区域标记（human / ai）P1：只读检查器**：`.zonecheck.json` + `tools/zonecheck/`（仓库根）。标记成对、纯栈配对、可嵌套；另有**第一行整文件标记**（`// zone:human` ⇒ 整份归它）；`check` / `stats` / `judge` | 判据 ㉖（25 条单测 + 仓库 `check` 0 错且 covered>0 + **CLI `judge`：actor=ai 碰 human → deny/rc=1**） | P1 已验；P2（nvim 上色）/P3（门）见下 |
 | 19 | **区域在编辑器里可见（P2）**：`:KcZoneStatus` / `:KcZoneCheck` / `:KcZoneJudge` / `:KcZoneRefresh` / `:KcZoneToggleLegacy`；区域上色 + sign + 行尾虚文本 | 判据 ㉗（`plan()` 的行映射/空区域/嵌套 + 真跑 `check`/`judge`/`refresh`） | 已验（headless）；真终端观感见“已知未验” |
 | 20 | **C/C++ 保存时格式化**：`clang-format`（仓库根 `.clang-format`），`BufWritePre` 触发；`:KcFormat` 手动 | 判据 ㉘（候选解析 + 真跑 `:w` 格式化 + **标记不被弄坏**） | 已验；代价见“已知未验” |
 | 21 | **切文件时自动保存**：`BufLeave` 时把改过的缓冲区写盘（只存“有名字、改过、可写”的普通文件）；**退出不存**（保住 `:q!` 是“丢弃”） | 判据 ㉚（切文件→存 / 退出→不存 / `:KcAutoSave off`→不存） | 已验 |

@@ -32,7 +32,7 @@ local SIGN = { human = "H", ai = "A", legacy = "L" }
 function M.plan(entry, opts)
   opts = opts or {}
   local out = {}
-  local function push(zone, a, b, depth)
+  local function push(zone, a, b, depth, no_virt)
     if not HL[zone] or b < a then return end
     local o = {
       line_hl_group = HL[zone],
@@ -40,11 +40,16 @@ function M.plan(entry, opts)
       sign_hl_group = HL[zone] .. "Sign",
       priority = 100 + (depth or 0),
     }
-    if zone ~= "legacy" then
+    if zone ~= "legacy" and not no_virt then
       o.virt_text = { { " " .. zone, "KcZoneVirt" } }
       o.virt_text_pos = "eol"
     end
     out[#out + 1] = { zone = zone, row0 = a - 1, end_row = b - 1, opts = o }
+  end
+  -- 整文件标记（stats 报的 base）：整份涂色、优先级最低（depth=-1 ⇒ 99），让配对区域盖住它。
+  -- 不挂 virt_text：整份的"标签"只出现在第一行一次，反而容易误读；底色本身就是信号。
+  if entry.base and entry.base ~= "legacy" and (opts.lines or 0) >= 1 then
+    push(entry.base, 1, opts.lines, -1, true)
   end
   for _, r in ipairs(entry.regions or {}) do
     push(r.zone, r.begin or 1, r["end"] or 0, r.depth or 0)
@@ -114,7 +119,8 @@ function M.refresh(buf)
     local fe = parsed.files[1]
     if not fe or fe.covered ~= true then return end
     local n = 0
-    for _, s in ipairs(M.plan(fe, { highlight_legacy = M.config.highlight_legacy })) do
+    for _, s in ipairs(M.plan(fe, { highlight_legacy = M.config.highlight_legacy,
+                                   lines = vim.api.nvim_buf_line_count(buf) })) do
       local ok = pcall(vim.api.nvim_buf_set_extmark, buf, NS, s.row0, 0,
         vim.tbl_extend("force", { end_row = s.end_row }, s.opts))
       if ok then n = n + 1 end
@@ -149,8 +155,8 @@ function M.status(buf)
     return nil
   end
   local c = fe.counts or {}
-  vim.notify(("kc zone: covered=true  human=%d ai=%d legacy=%d markers=%d regions=%d"):format(
-    c.human or 0, c.ai or 0, c.legacy or 0, c.markers or 0, #(fe.regions or {})),
+  vim.notify(("kc zone: covered=true  base=%s  human=%d ai=%d legacy=%d markers=%d regions=%d"):format(
+    tostring(fe.base or "legacy"), c.human or 0, c.ai or 0, c.legacy or 0, c.markers or 0, #(fe.regions or {})),
     vim.log.levels.INFO, { title = "kc zone" })
   return fe
 end

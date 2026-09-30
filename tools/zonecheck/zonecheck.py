@@ -126,23 +126,39 @@ def parse_text(text, prefix):
     """把一个文件的内容解析成区域。
 
     返回 dict：
-      errors:  [{line, code, message}]
-      regions: [{zone, begin, end, depth}]（begin/end 不含标记行）
-      counts:  {human, ai, legacy, markers}
-      unmarked:[[a, b]]  （连续的 legacy 内容行范围；**不含标记行**）
+      base:     "legacy" / "human" / "ai" —— 未标注行归谁。**整文件标记**（写在**第一行**的
+                `prefix zone:human|ai`，不带 `>>>`）会改写它；否则是 legacy。
+      errors:   [{line, code, message}]
+      warnings: [{line, code, message}]（目前只有 file-marker-not-first-line）
+      regions:  [{zone, begin, end, depth}]（begin/end 不含标记行）
+      counts:   {human, ai, legacy, markers}
+      unmarked: [[a, b]] （连续的 legacy 内容行范围；**不含标记行**）
     """
     lines = text.splitlines()
     p = re.escape(prefix)
+    filemark = re.compile(r"^\s*" + p + r"\s*zone:(human|ai)\s*(?:-->)?\s*$")
     bgn = re.compile(r"^\s*" + p + r"\s*>>>\s*zone:(human|ai)\s*(?:-->)?\s*$")
     end = re.compile(r"^\s*" + p + r"\s*<<<\s*(?:-->)?\s*$")
     part_bgn = re.compile(r"^\s*" + p + r"\s*>>>")
     part_end = re.compile(r"^\s*" + p + r"\s*<<<")
     zone_val = re.compile(r"zone:\s*([A-Za-z_][A-Za-z0-9_]*)")
 
-    errors, regions, kinds = [], [], []
+    errors, warnings, regions, kinds = [], [], [], []
     stack = []  # [{zone, line}]
+    base = "legacy"
 
     for idx, line in enumerate(lines, start=1):
+        if filemark.match(line):
+            if idx == 1:
+                # 整文件标记：定 base zone，本身算一行标记
+                kinds.append("marker")
+                base = filemark.match(line).group(1)
+            else:
+                # 位置不对：当普通注释，但**要出声** —— 否则就是“你写了、它没生效”
+                kinds.append(stack[-1]["zone"] if stack else base)
+                warnings.append({"line": idx, "code": "file-marker-not-first-line",
+                                 "message": "整文件标记（`zone:human|ai`，不带 `>>>`）只有写在**第一行**才算数；这一行被当普通注释了"})
+            continue
         if bgn.match(line):
             kinds.append("marker")
             stack.append({"zone": bgn.match(line).group(1), "line": idx})
@@ -170,7 +186,7 @@ def parse_text(text, prefix):
             errors.append({"line": idx, "code": "bad-format",
                            "message": "结束标记必须正好是 `<<<`，不能重复类型或写别的东西"})
             continue
-        kinds.append(stack[-1]["zone"] if stack else "legacy")
+        kinds.append(stack[-1]["zone"] if stack else base)
 
     for top in stack:
         errors.append({"line": top["line"], "code": "unpaired-begin",
@@ -195,7 +211,8 @@ def parse_text(text, prefix):
     if run_start is not None:
         unmarked.append([run_start, len(kinds)])
 
-    return {"errors": errors, "regions": regions, "counts": counts, "unmarked": unmarked}
+    return {"base": base, "errors": errors, "warnings": warnings,
+            "regions": regions, "counts": counts, "unmarked": unmarked}
 
 
 # ---------------------------------------------------------------- 收集文件
@@ -225,20 +242,25 @@ def read_text(path):
 # ---------------------------------------------------------------- 子命令
 
 def do_check(root, cfg, paths, as_json):
-    errors = []
+    errors, warnings = [], []
     for rel in iter_covered_files(root, cfg, paths):
         text = read_text(os.path.join(root, rel))
         if text is None:
             continue
-        for e in parse_text(text, prefix_for(rel, cfg))["errors"]:
+        r = parse_text(text, prefix_for(rel, cfg))
+        for e in r["errors"]:
             errors.append({"path": rel, **e})
+        for w in r["warnings"]:
+            warnings.append({"path": rel, **w})
     if as_json:
-        print(json.dumps({"schema": 1, "ok": not errors, "errors": errors, "warnings": []},
+        print(json.dumps({"schema": 1, "ok": not errors, "errors": errors, "warnings": warnings},
                          ensure_ascii=False, indent=2))
     else:
+        for w in warnings:
+            print(f"{w['path']}:{w['line']}: [warn/{w['code']}] {w['message']}")
         for e in errors:
             print(f"{e['path']}:{e['line']}: [{e['code']}] {e['message']}")
-        print(f"zonecheck: {len(errors)} 个错误")
+        print(f"zonecheck: {len(errors)} 个错误 / {len(warnings)} 个警告")
     return 1 if errors else 0
 
 
@@ -256,10 +278,12 @@ def do_stats(root, cfg, paths, as_json):
         files.append({
             "path": rel,
             "covered": True,
+            "base": r["base"],
             "counts": r["counts"],
             "regions": r["regions"],
             "unmarked": r["unmarked"],
             "errors": r["errors"],
+            "warnings": r["warnings"],
         })
     out = {"schema": 1, "root": root.replace("\\", "/"), "totals": totals, "files": files}
     if as_json:
@@ -276,19 +300,26 @@ def _severity(code, cfg):
     return cfg.get("policy", {}).get(key, "off")
 
 
-def _touched_zones(parsed, ranges, text_lines):
-    """ranges 是 1-based [[a,b]]；返回 (zones set, legacy_touched bool)。"""
+def _touched_zones(parsed, ranges):
+    """ranges 是 1-based [[a,b]]；返回 (zones set, legacy_touched bool)。
+
+    逐行取**最内层**区域（depth 最大）的归属；没有任何区域覆盖时归文件的 `base`。
+    这样 “base=human 的文件里切出一块 ai” 就能正确判成“只在 ai 区改动”。
+    """
     zones, legacy = set(), False
     regions = parsed["regions"]
+    base = parsed.get("base", "legacy")
     for a, b in ranges:
-        hit = False
-        for rg in regions:
-            if rg["begin"] <= b and a <= rg["end"]:
-                zones.add(rg["zone"])
-                hit = True
-        if not hit:
-            # 落在任何区域之外 = legacy 内容行（标记行不会被算进 ranges 的落点之外）
-            legacy = True
+        for ln in range(a, b + 1):
+            best = None
+            for rg in regions:
+                if rg["begin"] <= ln <= rg["end"] and (best is None or rg["depth"] > best["depth"]):
+                    best = rg
+            z = best["zone"] if best else base
+            if z == "legacy":
+                legacy = True
+            else:
+                zones.add(z)
     return zones, legacy
 
 
@@ -314,8 +345,10 @@ def judge(root, cfg, rel, new_text, actor, use_policy):
     # 标记行有没有被改动
     def marker_lines(t):
         out = []
-        for ln in t.splitlines():
-            if re.match(r"^\s*" + re.escape(prefix) + r"\s*(>>>\s*zone:(human|ai)|<<<)\s*(?:-->)?\s*$", ln):
+        for i, ln in enumerate(t.splitlines(), start=1):
+            if i == 1 and re.match(r"^\s*" + re.escape(prefix) + r"\s*zone:(human|ai)\s*(?:-->)?\s*$", ln):
+                out.append(ln.strip())   # 整文件标记
+            elif re.match(r"^\s*" + re.escape(prefix) + r"\s*(>>>\s*zone:(human|ai)|<<<)\s*(?:-->)?\s*$", ln):
                 out.append(ln.strip())
         return sorted(out)
 
@@ -331,8 +364,8 @@ def judge(root, cfg, rel, new_text, actor, use_policy):
         if j2 > j1:
             touched_new.append([j1 + 1, j2])
 
-    zones_b, legacy_b = _touched_zones(base, touched_base, base_lines)
-    zones_n, legacy_n = _touched_zones(prop, touched_new, new_lines)
+    zones_b, legacy_b = _touched_zones(base, touched_base)
+    zones_n, legacy_n = _touched_zones(prop, touched_new)
     zones = zones_b | zones_n
     legacy_touched = legacy_b or legacy_n
 

@@ -584,6 +584,15 @@ eq(#z.plan(e, { highlight_legacy = false }), 2, "legacy-off")
 eq(#z.plan({ regions = { { zone = "human", begin = 4, ["end"] = 3, depth = 0 } } }, {}), 0, "empty-region-skipped")
 local nest = z.plan({ regions = { { zone = "ai", begin = 2, ["end"] = 9, depth = 0 }, { zone = "human", begin = 4, ["end"] = 5, depth = 1 } } }, {})
 eq(pick(nest, "human").opts.priority > pick(nest, "ai").opts.priority, true, "nested-human-wins")
+-- 整文件标记（base）：整份一条规格、优先级 99（低于配对区域的 100+），且不挂 virt_text
+local b = z.plan({ base = "human", regions = {}, unmarked = {} }, { lines = 5, highlight_legacy = true })
+eq(#b, 1, "base-spec-count")
+eq(b[1].zone, "human", "base-zone")
+eq(b[1].row0, 0, "base-row0"); eq(b[1].end_row, 4, "base-end_row")
+eq(b[1].opts.priority, 99, "base-priority")
+eq(b[1].opts.virt_text, nil, "base-no-virt")
+-- base=legacy 不产生 base 规格（旧行为不变）
+eq(#z.plan({ base = "legacy", regions = {}, unmarked = { { 1, 2 } } }, { lines = 5 }), 1, "legacy-base-keeps-old")
 -- 集成：真跑检查器与异步 refresh
 vim.cmd("edit " .. vim.fn.fnameescape(vim.fn.getcwd() .. "/native/kc_hook.cpp"))
 local buf = vim.api.nvim_get_current_buf()
@@ -599,7 +608,7 @@ io.write("bad=" .. bad .. "\n")
 LUA
 out=$(timeout 180 "$NVIM" --headless -i NONE -c "luafile sopho-nook/.nvim/xdg/zone_check.lua" +qa! 2>&1); rc=$?
 case "$out" in
-  *"bad=0"*) ok "plan() 映射/空区域/嵌套 + check(0 错) + judge(零改动 allow) + refresh 都过" ;;
+  *"bad=0"*) ok "plan() 行映射/空区域/嵌套/整文件 base + check(0 错) + judge(零改动 allow) + refresh 都过" ;;
   *) no "zone P2 判据失败（rc=$rc）：$out" ;;
 esac
 
