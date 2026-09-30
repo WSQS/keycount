@@ -186,6 +186,46 @@ CREATE TABLE run_log (          -- 用来发现「昨天其实没在跑」
 交互：左键拖动移动；单击弹出今日总数 + Top 10 键；右键出托盘菜单（看报表 / 暂停采集 / 退出）。
 `rest_remind` 和托盘菜单是 v1，不在 v0。
 
+## 拖动：不能用 `event.relative` 累加（实测 2026-09-30）
+
+`pet/pet.gd` 原本是 `window_set_position(window_get_position() + event.relative)`。
+**看起来完全正确，实测每帧只跟 ~30%，而且约一半的帧在往后跳** —— 手感就是「跟不上 + 来回闪」。
+
+| 拖法（合成真实鼠标，按住左键连续拖） | 旧实现跟随比 | 旧实现反向跳 | 旧实现最大跟踪误差 |
+|---|---|---|---|
+| 1px / 1ms | 30% | — | **-281px**（线性累积） |
+| 3px / 3ms | 28% | 45% 的帧，最大反向 21px | — |
+| 10px / 10ms | 39% | 0% | — |
+| 10px / 40ms（旧判据用的形态） | **100%** | 0% | 0px ← 所以旧判据抓不住 |
+
+**原因（源码级）**：`platform/windows/display_server_windows.cpp` 里，`WM_MOUSEMOVE` 的
+`GET_X_LPARAM(lParam)` 是**客户区坐标**，Godot 的 `relative` 就是「本次客户区坐标 − 上次客户区坐标」
+（`mm->set_relative(mm->get_position() - Vector2(old_x, old_y))`）。而**我们正在移动自己所在的那个窗口**，
+客户区坐标基准跟着平移。Godot 的补正（`window_set_position()` 末尾调 `_update_real_mouse_position()`，
+用 `GetCursorPos` + `ScreenToClient` 回写 `old_x/old_y`）读的是**移动之后**的光标位置，
+而消息队列里还排着**按移动前基准生成**的 `WM_MOUSEMOVE`；两者一撞，
+算出的 `relative` ≈ 真实位移 − 上次窗口位移 ⇒ 变成 ~0 甚至反向。
+跟随比随速度下降，还伴 **~170ms 的卡顿**（窗口不动，然后猛跳一下）。
+
+**解法：用绝对坐标，不要 `relative`。** 按下时记 「抓取点」偏移，移动时直接把窗口摆到「光标 − 偏移」：
+
+```gdscript
+_drag_offset = DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
+DisplayServer.window_set_position(DisplayServer.mouse_get_position() - _drag_offset)
+```
+
+绝对目标与坐标基准无关：即使某条陈旧消息多触发一次移动，也只是把窗口摆到**同一个正确目标**上。
+（`mouse_get_position()` 与 `window_get_position()` 都减同一个 `_get_screens_origin()`，相减口径一致，
+多显示器也不会错。）
+
+**改后实测（同参数）**：跟随比 100–102%，反向帧 0，最大跟踪误差 7–10px（≈ 一帧的位移），
+最长更新间隔 171ms → 13.7ms。
+
+**判据**：`powershell -File agent-test/drag-test.ps1`。它先把窗口摆到固定位置、检查光标真的落在
+宠物圆心上（避免「根本没开始拖」被当成通过），然后**连续**拖 1px/1ms × 300 步，
+断言 `|窗口位移 − 光标位移| ≤ 5px`，退出码非 0 即失败。
+已反向验证过（一个不会红的判据等于没有）：退回旧实现时它打印 `73% ❌`，改回新实现 100% ✅。
+
 ## native/ 平台核心：已实现并验证
 
 `native/kc_hook.h` / `kc_hook.cpp` / `test_hook.cpp` —— **不依赖 Godot 的纯 C++**（只用 Win32 + 

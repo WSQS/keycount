@@ -19,7 +19,7 @@ description: 在 keycount 仓库里改完东西后，怎么按层证明它真的
 |---|---|
 | `native/**`（钩子、存储、键名） | 1 |
 | `gdext/**`（接线层、SConstruct） | 1 → 2 |
-| `pet/**`（口径、状态机、窗口） | 1 → 2 → 3 → 4 → 5 |
+| `pet/**`（口径、状态机、窗口） | 1 → 2 → 3 → 4 → 5；交互/拖动改动另跑 `agent-test/drag-test.ps1` |
 | `sopho-nook/**` | 见 `sopho-nook/tools/criteria.sh` |
 
 ### 1. 核心自检（不需要 Godot，秒级）
@@ -99,4 +99,8 @@ uv run --no-project python tools/keycount.py today
 - **合成输入的 `scancode` 是 0**：所以键名归一化**以 vkCode 为主**、扫描码兜底。
 - **PowerShell 里 `$null.Count` 也是 `$null`**：`$x -eq 0` 会判为假，重试循环被静默跳过。
   空管道结果赋给变量得到的是 `$null`，不是空数组 —— 函数要用 `return ,$arr` 兜住。
+- **PowerShell 变量名大小写不敏感**：`$h`（窗口句柄）与 `$H`（窗口高度）**是同一个变量**。
+  实测踩过：给 `$H` 赋 380 就把句柄覆盖成 380，之后 `GetWindowRect` 静默失败、
+  打印出 `0,0,0x0`，看起来像“窗口消失了”或“拖动无效”——白查了两轮。
+  写验证脚本时句柄叫 `$hwnd`，尺寸别用 `$H`。
 - **`.cmd` 必须纯 ASCII + LF**：cmd.exe 遇到「LF + 非 ASCII」会行错位，把真实代码行当命令跑。

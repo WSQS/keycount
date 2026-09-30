@@ -40,6 +40,7 @@ var _log_t: float = 0.0
 var _focus_true_frames: int = 0
 var _input_key_count: int = 0
 var _dragging: bool = false
+var _drag_offset: Vector2i = Vector2i.ZERO   # 抓取点相对窗口左上角的偏移（绝对坐标法用）
 var _db_ok: bool = false
 
 func _now() -> float:
@@ -249,10 +250,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed:
 			if event.position.distance_to(get_viewport_rect().size / 2.0) < 90.0:
 				_dragging = true
+				# 绝对坐标：记下抓取点相对窗口左上角的偏移，之后每次直接把窗口摆到
+				# “光标 - 偏移”。不能累加 event.relative —— 我们在移动自己所在的窗口，
+				# WM_MOUSEMOVE 的客户区坐标基准随之变化（Godot 的补正
+				# _update_real_mouse_position 与队列里旧基准的消息有竞争），
+				# 实测每帧只跟 30%、约 45% 的帧反向跳（抖动/闪烁）。
+				_drag_offset = DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
 		else:
 			_dragging = false
 	elif event is InputEventMouseMotion and _dragging:
-		DisplayServer.window_set_position(DisplayServer.window_get_position() + Vector2i(event.relative))
+		DisplayServer.window_set_position(DisplayServer.mouse_get_position() - _drag_offset)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
