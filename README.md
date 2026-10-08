@@ -10,7 +10,7 @@ keycount — 桌面宠物 + 每日键盘计数
 
 | 能力 | 状态 |
 |---|---|
-| 透明 / 置顶 / 无边框窗口浮在桌面 | ✅ 实测截图 `shots/crop-final.png` |
+| 透明 / 置顶 / 无边框窗口浮在桌面 | ✅ 实测（`agent-test\run-pet.ps1` 起一次即可复现） |
 | 全局键盘钩子（**非焦点**也能抓） | ✅ `dropped=0` |
 | 键名归一化（`Shift+A` → `a`） | ✅ 自检 25/25 |
 | **不抢键盘焦点** | ✅ `focus_true_frames=0`、`input_keys=0`，`hwndFocus` 始终是别的窗口 |

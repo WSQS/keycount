@@ -91,7 +91,9 @@ per_pixel_transparency/allowed，画一个会呼吸的圆，然后全屏截图�
 | **OpenGL3 / Compatibility** | ✅ 透明正常：圆浮在桌面之上，四角能看到后面的编辑器文字和终端。 |
 
 → 这台机器上做透明桌宠**必须用 Compatibility 渲染器**（或去 NVIDIA 控制面板把 Vulkan present method 改成
-Native —— 那是机器级设置，会影响别的程序）。截图证据：`agent-test/spike-godot/crop-vulkan.png`、`crop-opengl3.png`。
+Native —— 那是机器级设置，会影响别的程序）。
+（当时两张对照截图未随仓库发布：原图是整屏截图，含作者的个人桌面信息。
+实验工程本身在 `agent-test/spike-godot/`，换渲染器重跑就能自己看到。）
 
 ### 全局按键：实测不合格
 
@@ -112,14 +114,15 @@ Native —— 那是机器级设置，会影响别的程序）。截图证据：
 
 ### 作者的 Godot 底子（这条最重）
 
-`C:\Users\<user>\Documents\godot` 不是普通 Godot：`git describe` = `（内网构建版本已略去）`，
-分支 `develop`，remote `origin = （内网仓库地址已略去）`，
-且有四个非官方模块：`modules/camera`、`modules/camera_controller_3d`、`modules/command_tool`、`modules/data_table`，
-还有自编译产物 `bin/matrix.windows.editor.dev.x86_64.exe`。
+作者本机那份 Godot **不是 stock 4.7.2**，而是一个内部自用的 fork（公司项目：仓库地址、版本号、
+模块名都不便公开），`develop` 分支、带若干非官方模块、有自编译的编辑器产物。
 
-含义：全局钩子 / 点击穿透 / 托盘都可以作为**原生模块**加进 fork
-（`platform/windows/display_server_windows.cpp` 就在手边），自定义导出模板还能压体积。
+含义：全局钩子 / 点击穿透 / 托盘都可以作为**原生模块**加进 fork（引擎源码就在手边，
+`platform/windows/display_server_windows.cpp` 之类想读就读），自定义导出模板还能压体积。
 这条把 Godot 从「系统集成最麻烦」变成「系统集成自己就能改」。
+
+**不影响本仓库的可复现性**：宠物跑的是 **stock Godot 4.7.2（Steam 版）**，
+本节的实测结论都在 stock 上做的；fork 只在「必要时能改引擎」这条上有分量。
 
 ## 数据模型
 
@@ -272,7 +275,8 @@ ALIVE ... focused=false focus_true_frames=0 input_keys=0 dropped=0   ← 全程�
 
 期间用 `GetGUIThreadInfo` 查过：`hwndFocus=0xA03BA`（浏览器）—— **键盘始终没落到宠物手里**，
 而钩子照样抓到 9 下注入按键 + 真实硬件按键，`dropped=0`。
-截图：`shots/crop-final.png`（圆浮在桌面上，下面编辑器文字清晰到圆的边缘）。
+（原来这里有一张对照截图：圆浮在桌面上，后面编辑器文字清晰到圆的边缘。
+因原图含个人桌面信息未随仓库发布；重跑 `agent-test\run-pet.ps1` 就能自己看。）
 
 ### 抢焦点这件事打了三仗（记下来，别再踩）
 

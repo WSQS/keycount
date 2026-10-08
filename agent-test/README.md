@@ -21,10 +21,10 @@
 | `fg.ps1` / `fg2.ps1` | 查"键盘到底在谁手上"。`fg2.ps1` 用 `GetGUIThreadInfo`，是**唯一可信**的那个（`GetForegroundWindow` / Godot `has_focus()` 都不可信） |
 | `inject.ps1` / `inject2.ps1` / `inject3.ps1` | 弹一个自测窗口、`SendKeys` 往**它自己**里打字（不向任何别的窗口注入），验证全局抓键。`inject3.ps1` 把结果写到 `native/inject-received.txt` |
 | `drag-test.ps1` | 模拟真实拖拽 |
-| `screenshot.ps1` / `crop.ps1` / `crop2.ps1` | 截图与裁剪（SPEC 里的裁剪证据就是它们出的） |
+| `screenshot.ps1` / `crop.ps1` / `crop2.ps1` | 截图与裁剪。注意：截图会拍进**整个桌面**，别把原图提交进 git（本仓库为此清过历史） |
 | `probe.py` | 早期探针 |
 | `cs-probe/` | 早前验证钩子用的 C# 探针（源码保留，`bin/`、`obj/` 不进 git） |
-| `spike-godot/` | **Godot 透明窗口实测工程**（420×420、borderless、transparent）。回答了一个问题：Vulkan/Forward+ 下透明窗口是**纯黑方块**，OpenGL3/Compatibility 才正常。`crop-vulkan.png` / `crop-opengl3.png` 是 SPEC 引用的原始证据 |
+| `spike-godot/` | **Godot 透明窗口实测工程**（420×420、borderless、transparent）。回答了一个问题：Vulkan/Forward+ 下透明窗口是**纯黑方块**，OpenGL3/Compatibility 才正常。当时的 `crop-vulkan.png` / `crop-opengl3.png` 对照证据含个人桌面信息、未随仓库发布，工程本身可重跑 |
 
 ## 怎么用（照抄）
 

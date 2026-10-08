@@ -1,6 +1,6 @@
 extends Node2D
 
-const LOG_PATH := "C:/Users/<user>/.pi/profiles/assistant/scratch/<session-id>/keycount/spike-godot/run.log"
+const LOG_PATH := "user://spike-godot-run.log"
 
 var _log: FileAccess
 var _t := 0.0
