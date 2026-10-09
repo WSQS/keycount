@@ -1,0 +1,63 @@
+# 便宜的检查：不编扩展、不开宠物，几十秒内给出结论。
+#
+# 覆盖范围（与仓库的口径一致：**证的了的才自动化**）：
+#   - 历史卫生：全部 git 对象里不得有截图/凭据/绝对用户路径（`tools/scan_history.py`）
+#   - zonecheck：区域标记检查器的单测 + 本仓库自身 check（必须 0 错 0 警）
+#   - native：不依赖 Godot 的核心自检（存储 39 条 + 键名 25 条）
+#
+# **不覆盖**（CI 里做不了、做了也是假绿，见 SPEC.md「导出」与 SKILL）：
+#   宠物真的能跑 / 不抢焦点 / 全局抓键 / 单实例 / 拖动 —— 这些必须在本机手验。
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 是必须的：这个检查要扫**全部** git 对象（含不可达对象）
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 历史卫生（截图 / 凭据 / 绝对路径）
+        run: python3 tools/scan_history.py
+
+  zonecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: zonecheck 单测
+        run: python3 tools/zonecheck/test_zonecheck.py
+      - name: 本仓库 zonecheck check（要求 0 错 0 警）
+        run: python3 tools/zonecheck/zonecheck.py check
+
+  native:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: "msys2 {0}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+      - name: 存储自检（39 条断言，不需要 Godot）
+        run: |
+          native/build_store.sh
+          cd native && ./test_store.exe
+      - name: 键名自检（25 条断言）
+        run: |
+          cd native
+          g++ -std=c++17 -O2 -Wall -Wextra -static -static-libgcc -static-libstdc++ \
+              -o test_hook.exe kc_hook.cpp test_hook.cpp -luser32
+          ./test_hook.exe --selftest

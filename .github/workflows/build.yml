@@ -1,0 +1,149 @@
+# 编译 + 出包：**每次 push 都产出一个可下载的 zip**（artifact），tag 时由 release.yml 复用。
+#
+# 为什么两个 target 都要编：2026-10-09 踩过一个坑 —— `template_release.dll` 旧了
+# （比源码旧），拿它做的 release 导出版里扩展**静默不加载**（一条报错都没有）。
+# 干净检出 + 两个 target 都编，这类问题在 CI 里不可能发生。详见 SPEC.md「导出（release）」。
+#
+# 产物（artifact）：keycount-windows-x64-<version>.zip
+#   keycount.exe / keycount.windows.template_release.x86_64.dll
+#   start.cmd / start.ps1（启动器：把键盘焦点还给原来的窗口）/ README.txt
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.7.2
+  # 与 gdext/GODOT_CPP_PIN.txt 一致；下面的步骤会断言 checkout 到的 SHA
+  GODOT_CPP_PIN: 507ed9d840c01a3c5b2a39af8bb4000bfac30bf5
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # godot-cpp 编译产物很贵（1091 个编译单元），按 PIN 缓存；源码也在里面
+      - uses: actions/cache@v4
+        with:
+          path: gdext/godot-cpp
+          key: godot-cpp-${{ env.GODOT_CPP_PIN }}-${{ runner.os }}
+      # Godot 编辑器 + 导出模板（只取 windows 成员，约 300MB）
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .ci/godot
+            .ci/templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ runner.os }}
+
+      - name: 取 godot-cpp（按 PIN，并断言 SHA）
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin=$(awk '/^commit/{print $2}' gdext/GODOT_CPP_PIN.txt)
+          [ "$pin" = "$GODOT_CPP_PIN" ] || { echo "PIN 文件与 workflow 里的值不一致：$pin"; exit 1; }
+          if [ ! -d gdext/godot-cpp/.git ]; then
+            # 完整克隆（35MB）：不玩 --filter/单提交 fetch，少两种失败模式
+            git clone --quiet https://github.com/godotengine/godot-cpp gdext/godot-cpp
+          fi
+          git -C gdext/godot-cpp fetch --quiet --tags origin 2>/dev/null || true
+          git -C gdext/godot-cpp checkout --force "$pin"
+          got=$(git -C gdext/godot-cpp rev-parse HEAD)
+          [ "$got" = "$pin" ] || { echo "godot-cpp SHA 与 PIN 不符：$got != $pin"; exit 1; }
+          echo "godot-cpp @ $got"
+
+      - name: Godot 编辑器（缓存里没有就下）
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe=".ci/godot/Godot_v${GODOT_VERSION}-stable_win64.exe"
+          if [ ! -f "$exe" ]; then
+            mkdir -p .ci/godot
+            curl -sSL -o .ci/godot/editor.zip \
+              "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_win64.exe.zip"
+            python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+              .ci/godot/editor.zip .ci/godot
+            rm -f .ci/godot/editor.zip
+          fi
+          "$exe" --version
+
+      - name: 导出模板（缓存里没有就下；只取 windows 成员）
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=".ci/templates/${GODOT_VERSION}.stable"
+          if [ ! -f "$dir/windows_release_x86_64.exe" ]; then
+            python tools/ci/fetch_export_templates.py --version "$GODOT_VERSION" --dest .ci/templates
+          fi
+          # Godot 只认 %APPDATA%\Godot\export_templates\<版本串>\ —— 拷过去。
+          # 注意 bash 侧要用 cygpath 转成 /c/... 这种 MSYS 路径，$APPDATA 本身是 C:\... 形式
+          dest="$(cygpath -u "$APPDATA")/Godot/export_templates"
+          mkdir -p "$dest"
+          cp -r .ci/templates/* "$dest/"
+          ls "$dest/${GODOT_VERSION}.stable/" | head -5
+
+      - name: dump extension_api.json（gdext 构建的输入）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gdext/api
+          ./.ci/godot/Godot_v${GODOT_VERSION}-stable_win64_console.exe --headless --dump-extension-api
+          mv extension_api.json gdext/api/extension_api.json
+          wc -c gdext/api/extension_api.json
+
+      - name: 编扩展（debug + release）
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet scons
+          # pip 装到 user-site 时 Scripts 不一定在 PATH 上，显式补一下
+          export PATH="$PATH:$(python -c 'import site,os;print(os.path.join(site.USER_BASE,"Scripts"))')"
+          command -v scons
+          cd gdext
+          scons platform=windows target=template_debug   api_version=4.7 -j"$NUMBER_OF_PROCESSORS"
+          scons platform=windows target=template_release api_version=4.7 -j"$NUMBER_OF_PROCESSORS"
+          ls -la bin/
+
+      - name: 把 dll 放到工程里，做过导入，导出 release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp gdext/bin/*.dll pet/addons/keycount/bin/
+          godot=./.ci/godot/Godot_v${GODOT_VERSION}-stable_win64_console.exe
+          # 过一遍导入：没有 .godot/extension_list.cfg 时扩展不会被登记
+          "$godot" --headless --editor --quit --path pet >/dev/null 2>&1 || echo "（导入有非零退出，继续）"
+          mkdir -p dist
+          # 导出目标必须是 **Windows 路径**：Git Bash 的 $(pwd) 是 /d/a/...，原生 Godot 不认
+          out=$(python -c "import os;print(os.path.abspath('dist/keycount.exe'))")
+          "$godot" --headless --path pet --export-release "Windows Desktop" "$out"
+          ls -la dist/
+
+      - name: 组装发布包（+ sha256）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = if ($env:GITHUB_REF -like "refs/tags/*") { $env:GITHUB_REF_NAME } else { "sha-$($env:GITHUB_SHA.Substring(0,7))" }
+          "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV
+          Copy-Item packaging/start.cmd, packaging/start.ps1, packaging/README.txt dist/
+          (Get-Content dist/README.txt -Raw).Replace("__VERSION__", $version) | Set-Content dist/README.txt -NoNewline
+          $zip = "keycount-windows-x64-$version.zip"
+          Compress-Archive -Path dist/* -DestinationPath $zip -Force
+          (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() + "  $zip" | Set-Content "$zip.sha256"
+          Get-Content "$zip.sha256"
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keycount-windows-x64-${{ env.VERSION }}
+          path: |
+            keycount-windows-x64-*.zip
+            keycount-windows-x64-*.zip.sha256
+          if-no-files-found: error

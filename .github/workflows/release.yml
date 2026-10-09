@@ -1,0 +1,46 @@
+# tag（v*）→ 建一个 **draft** release，附上 zip 与 sha256。
+#
+# 为什么是 draft 而不是直接发：CI 只能断言「包出来了、哈希对」，**断言不了**「不抢焦点、
+# 抓得到键、DB 落在同一个目录」——那几条必须在本机手验。让人点 Publish，机器只管出包。
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 建 release 需要
+
+jobs:
+  build:
+    # 直接复用 build.yml（同一份编译+出包逻辑，避免两套走偏）
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 建 draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          find artifacts -type f | sort
+          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.sha256' \) | sort | tr '\n' ' ')
+          [ -n "$files" ] || { echo "没有找到 zip/sha256 产物"; exit 1; }
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "keycount $GITHUB_REF_NAME" \
+            --generate-notes \
+            $files
+          # 把「先读这段」的固定说明放在自动生成说明的前面
+          body=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          { cat .github/release-notes.md; printf '\n---\n\n%s\n' "$body"; } > release-body.md
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file release-body.md
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json url,isDraft --jq '"draft release: \(.url)  isDraft=\(.isDraft)"'

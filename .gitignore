@@ -36,6 +36,8 @@ pet/.godot/
 
 # ---- 导出产物（dist/：scons 编的 dll + godot --export 出的 exe/pck）----
 dist/
+# ---- CI 的临时目录（Godot 编辑器 / 导出模板缓存）----
+.ci/
 
 # ---- 运行产物：日志与原始全屏截图（可随时重新生成）----
 *.log
