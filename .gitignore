@@ -31,7 +31,11 @@ agent-test/cs-probe/obj/
 # ---- Godot ----
 pet/.godot/
 *.import
-export_presets.cfg
+# 注意：export_presets.cfg **故意入库** —— release 工作流要用它做导出（Windows Desktop 预设，
+# 里面没有机密）。以后若加 Android 签名之类的东西，再单独排除。
+
+# ---- 导出产物（dist/：scons 编的 dll + godot --export 出的 exe/pck）----
+dist/
 
 # ---- 运行产物：日志与原始全屏截图（可随时重新生成）----
 *.log

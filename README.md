@@ -17,6 +17,7 @@ keycount — 桌面宠物 + 每日键盘计数
 | 宠物状态机（idle / typing / excited / sleepy） | ✅ 由实时 KPM 驱动 |
 | **统计落盘**（真 SQLite，崩溃安全 WAL） | ✅ 重启不归零；强杀能被发现 |
 | 命令行报表 | ✅ `tools/keycount.py`（直读同一个库） |
+| **导出版**（单文件 exe + 启动器） | ✅ 实测：扩展加载、透明、**不抢焦点**、DB 与开发版同路径（见 SPEC「导出」） |
 | 点击穿透 | ❌ 扩展里写好了，宠物还没调用 |
 | 真素材 / 动画 | ❌ 现在是个占位圆 |
 | 托盘图标 / 开机自启 / 中文字体 | ❌ 都没有 |
@@ -49,6 +50,8 @@ pet/             Godot 工程
   project.godot         透明置顶 + no_focus + gl_compatibility
   pet.gd                占位宠物 + 状态机 + 落盘口径（什么算一天/flush 频率）
   addons/keycount/      扩展的 .gdextension + 编好的 dll
+packaging/       发布包里的启动器与说明（start.cmd / start.ps1 / README.txt）
+dist/            导出产物（.gitignore；godot --export-release 生成）
 agent-test/      运行/验证工具箱（可重跑；见 agent-test/README.md）
   run-pet.ps1           **启动器 —— 启动宠物必须用它**
   inject3.ps1           往自测窗口注入按键，验证全局抓键

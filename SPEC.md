@@ -229,6 +229,67 @@ DisplayServer.window_set_position(DisplayServer.mouse_get_position() - _drag_off
 断言 `|窗口位移 − 光标位移| ≤ 5px`，退出码非 0 即失败。
 已反向验证过（一个不会红的判据等于没有）：退回旧实现时它打印 `73% ❌`，改回新实现 100% ✅。
 
+## 导出（release）：已跑通，外加一个静默坑（实测 2026-10-09）
+
+**结论：导出版能跑，五条关键性质都实测通过。**
+
+| 项 | 实测结果 |
+|---|---|
+| 产物 | `dist/keycount.exe`（104MB 模板 + **12KB 内嵌 pck**）+ `keycount.windows.template_release.x86_64.dll`（同级） |
+| 扩展加载 | `hook.start() -> true`；`set_no_activate -> true`、`ex_style : noactivate=1 toolwindow=1` |
+| 透明 | 截图确认：圆浮在别的窗口上、四角**穿透**，不是黑方块 |
+| **不抢焦点** | `fg2.ps1` → `hwndFocus` 是别的窗口；日志 `prev_foreground=0x11611F8 ≠ hwnd`、`第一帧 restore_prev_foreground -> true`、`focused=false`、`input_keys=0` ⇒ **启动器在导出版里同样必需且有效** |
+| DB 路径 | 与开发版**同一个** `user://keycount.db`（日志：「库里已有 4041 下」，同一次运行涨到 4148） |
+| 钩子 / 不翻倍 | 109 条 KEY 行 ↔ 总数 +107（≈1:1，不是 2:1） |
+| 单实例 | 再起一个 → 进程数仍 1（第二个自己退） |
+
+导出形状（`pet/export_presets.cfg` 已入库；`packaging/` 是随包分发的启动器与说明）：
+
+```
+dist/
+  keycount.exe              ← 双击 = 像普通应用（启动那一下会抢焦点）
+  keycount.windows.template_release.x86_64.dll
+  start.cmd / start.ps1     ← 双击 / 自启：把键盘还给原来那个窗口
+  README.txt                ← 隐私 / 杀软 / 用法
+```
+
+### 坑：release dll 旧了会「静默不加载」——一条报错都没有
+
+实测：`template_release.dll`（编于 09-29 16:05）比 `gdext/src/kc_window.cpp`（09-29 22:47）、
+`kc_module.cpp`（09-30 09:00）都旧 ⇒ 拿它做 release 导出后，导出版里
+**`pet.gd` 直接解析失败（`Could not find type "KeyCountGuard"`），而引擎连一条
+`Error loading extension` 都不打**（全量 stdout 15 行、`godot.log` 一致，零 error/warning）。
+
+排查路线上值得记住的两点：
+
+- **同一套布局下 debug 导出能加载、release 不能** ⇒ 一次就把范围缩到「模板 or dll」，重编 dll 即定位。
+- 摆文件没用：三种清单位置（根 / `.godot/` / `godot/`）× 两种 dll 位置全试过 ——
+  **清单读得到、dll 就在同级，仍然静默不加载**。真正能回答「加载了没」的判据是
+  让导出版自己说（探针场景里 `ClassDB.class_exists("KeyCountGuard")`）。
+
+**为什么会发生**：nook 的 `bin/kctest` 只编 `template_debug`，日常（编辑器跑宠物）也只用 debug 模板 +
+debug dll ⇒ **release 这条链从来没被碰过**。所以 CI 必须 debug + release **两个 target 都编**。
+
+### 三个附带的实测细节
+
+- **`rendering_method` 读回来是 `forward_plus`**（工程里写的是 `gl_compatibility`），
+  但截图证明透明正常 ⇒ 这个读回值有误导性（运行期被规范化）。**不影响发布**。
+- 导出模板在这台机器上来自 **Steam 安装目录**的 `editor_data/export_templates/4.7.2.stable/`，
+  不是 `%APPDATA%`。CI 得自己准备（官方 tpz 1.28GB，或用 Range 只取 windows 成员 ~100MB）。
+- 导出目录里可以直接跑 `keycount.exe --headless --verbose`：导出版照样接受引擎命令行，
+  是排查「扩展没加载」最快的手段。
+
+### 日志口径（2026-10-09 改）
+
+- 落点改 `user://run.log`（原来写 `res://run.log` = 工程/exe 旁边；装进 `Program Files` 时会静默写不出）。
+- **1MB 上限 + 轮转**（保留 1 份 `run.log.1`）：不轮转时实测长到过 **80MB**。
+  日志是**诊断**用的，不是数据——计数在 SQLite 库里，轮转永远不碰它。
+- **逐键行只在 debug 构建里写**（`OS.is_debug_build()`）：发布版不留「带时间序的按键流水」，
+  只写启动 / 落盘 / ALIVE 这些状态行。开发期判据（SKILL 里「9 条 KEY 行」）照旧。
+
+**判据**：`pet/export_presets.cfg` + 导出命令；然后按上表逐条验 —— 扩展加载看 `user://run.log` 的
+`hook.start() -> true`，不抢焦点看 `agent-test/fg2.ps1`，DB 看 `tools/keycount.py today`。
+
 ## native/ 平台核心：已实现并验证
 
 `native/kc_hook.h` / `kc_hook.cpp` / `test_hook.cpp` —— **不依赖 Godot 的纯 C++**（只用 Win32 + 

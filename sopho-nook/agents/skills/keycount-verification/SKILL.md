@@ -51,7 +51,8 @@ powershell -File agent-test/run-pet.ps1     # 或 Windows 上直接跑那一行
 **不要直接跑 Godot**：Godot 在 GDExtension 初始化**之前**就创建并激活了主窗口，
 所以扩展内部永远看不到「原来谁持有键盘」；少了启动器那一步，宠物会攥着你的键盘焦点。
 
-**判据**：`pet/run.log` 里出现 `hook.start() -> true`、`库已打开`、
+**判据**：`user://run.log`（= `%APPDATA%\Godot\app_userdata\keycount pet\run.log`）里出现
+`hook.start() -> true`、`库已打开`、
 `ALIVE ... db=ok`，并且**没有** `!!` 开头的行。
 
 ### 4. 不抢焦点（这条最容易假通过）
@@ -61,7 +62,7 @@ powershell -File agent-test/fg2.ps1
 ```
 
 **判据**：输出的 `hwndFocus` **不能是** `keycount pet (DEBUG)`，
-而且 `pet/run.log` 的 ALIVE 行里 `input_keys=0`。
+而且 `user://run.log` 的 ALIVE 行里 `input_keys=0`。
 
 为什么必须用 `fg2.ps1`：`GetForegroundWindow` 与 Godot 的 `has_focus()` 在这条链上都**不可信**
 （实测过：前者会报成宠物、后者忽真忽假）。真正决定键盘去向的是 `GetGUIThreadInfo` 的 `hwndFocus`。
@@ -73,7 +74,7 @@ powershell -File agent-test/inject3.ps1          # 往自测窗口注入 9 下
 uv run --no-project python tools/keycount.py today
 ```
 
-**判据**：注入窗口自己收到 `Abc`；`run.log` 里出现 9 条 `KEY` 行；
+**判据**：注入窗口自己收到 `Abc`；`user://run.log` 里出现 9 条 `KEY` 行；
 库里今日总数**涨 9**（不是 18 —— 涨 18 就是单实例没守住，见下）。
 
 落盘要**重启一次**再验一遍：第二次启动的日志里应有

@@ -5,7 +5,8 @@ extends Node2D
 # 职责划分：什么算一天、哪个小时、多久 flush 一次，都在这里决定（业务口径）；
 # 扩展只负责「可靠写进去 / 查得回来」。改口径不用重编扩展。
 
-const LOG_PATH := "run.log"
+const LOG_PATH := "user://run.log"           # 日志放 user://：导出版不会在 exe 旁边留文件，装进 Program Files 也能写
+const LOG_MAX_BYTES := 1_000_000             # 超过就轮转，只留 1 份旧日志（不轮转时实测长到过 80MB）
 const DB_PATH := "user://keycount.db"       # 存 %APPDATA%\Godot\app_userdata\<项目名>\
 const VERSION := "v1"
 
@@ -46,6 +47,21 @@ var _db_ok: bool = false
 func _now() -> float:
 	return Time.get_ticks_msec() / 1000.0
 
+# 简单轮转：当前日志超过上限就改名为 run.log.1（只留一份）。
+# 日志是**诊断**用的，不是数据 —— 计数在 SQLite 库里，轮转永远不碰它。
+func _rotate_log() -> void:
+	var cur := ProjectSettings.globalize_path(LOG_PATH)
+	var f := FileAccess.open(cur, FileAccess.READ)
+	if f == null:
+		return
+	var size := f.get_length()
+	f = null
+	if size < LOG_MAX_BYTES:
+		return
+	var old := cur + ".1"
+	DirAccess.remove_absolute(old)
+	DirAccess.rename_absolute(cur, old)
+
 func _logline(s: String) -> void:
 	if _log != null:
 		_log.store_line("%7.2f %s" % [_now(), s])
@@ -75,7 +91,8 @@ func _ready() -> void:
 		get_tree().quit()
 		return
 
-	_log = FileAccess.open(ProjectSettings.globalize_path("res://") + LOG_PATH, FileAccess.WRITE)
+	_rotate_log()
+	_log = FileAccess.open(LOG_PATH, FileAccess.WRITE)
 
 	var wall := _stamp()
 	_logline("启动 %s  版本 %s" % [wall, VERSION])
@@ -152,7 +169,10 @@ func _on_key_event(key_name: String, vk: int, scancode: int, extended: bool, is_
 
 	_down_times.append(_now())
 	_last_key_time = _now()
-	_logline("KEY %-12s vk=0x%02X sc=0x%02X ext=%d" % [key_name, vk, scancode, 1 if extended else 0])
+	# 逐键行只在 debug 构建里写：发布版不留「带时间序的按键流水」，日志只记状态。
+	# 开发期（编辑器 / debug 模板）照旧写，判据依赖它。
+	if OS.is_debug_build():
+		_logline("KEY %-12s vk=0x%02X sc=0x%02X ext=%d" % [key_name, vk, scancode, 1 if extended else 0])
 
 # 把待落盘的增量写进库。失败时**不清空** —— 数据留在内存里下次再试，不丢。
 func _flush(verbose: bool) -> bool:
