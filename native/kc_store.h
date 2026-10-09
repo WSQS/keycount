@@ -75,12 +75,27 @@ public:
 
 	const std::string &last_error() const { return last_error_; }
 
+	// 存储结构的版本（SQLite 内建的 PRAGMA user_version）。它和**发布版本号是两件事**：
+	// 发布号天天变，结构几个月才动一次；合成一个号的后果，要么每次发版都像"要迁移"，
+	// 要么结构真变了而发布号没动 ⇒ 静默写坏用户的计数历史。
+	// 库比本程序新时 open() 会失败（拒绝按旧结构往上写）。
+	int schema_version() const { return schema_version_; }
+
 private:
 	bool exec(const char *sql);
 	bool prepare(const char *sql, sqlite3_stmt **stmt_out);
+	// 读一个整数（PRAGMA、COUNT 这类）
+	bool scalar_int(const char *sql, int *out);
+	// 失败时的统一收尾：把连接关掉，保证 is_open() 和 open() 的返回值一致
+	// （不给调用方留下“打开失败但还是 is_open()==true”的半开状态）
+	bool abort_open() {
+		close();
+		return false;
+	}
 
 	sqlite3 *db_ = nullptr;
 	int64_t current_run_id_ = 0;
+	int schema_version_ = 0;
 	std::string last_error_;
 };
 

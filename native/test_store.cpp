@@ -88,6 +88,99 @@ void dump_day(const std::string &day) {
 	printf("\n");
 }
 
+// ---- 存储结构版本与迁移 ----
+// 这一组断言盯的是“升级不能弄丢用户的历史”：旧库（还没有 user_version）打开后
+// 要自动升级、数据还在；而比程序新的库要**拒绝打开**，不能按旧结构往上写。
+
+bool exec_raw(sqlite3 *raw, const char *sql) {
+	char *err = nullptr;
+	const int rc = sqlite3_exec(raw, sql, nullptr, nullptr, &err);
+	if (err != nullptr) {
+		sqlite3_free(err);
+	}
+	return rc == SQLITE_OK;
+}
+
+int raw_int(const std::string &path, const char *sql) {
+	sqlite3 *raw = nullptr;
+	if (sqlite3_open(path.c_str(), &raw) != SQLITE_OK) {
+		return -1;
+	}
+	sqlite3_stmt *stmt = nullptr;
+	int v = -1;
+	if (sqlite3_prepare_v2(raw, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+		if (sqlite3_step(stmt) == SQLITE_ROW) {
+			v = sqlite3_column_int(stmt, 0);
+		}
+		sqlite3_finalize(stmt);
+	}
+	sqlite3_close(raw);
+	return v;
+}
+
+void check_schema_version_migration() {
+	const std::string legacy = "test_store_legacy.db";
+	remove_db_files(legacy);
+
+	// 造一个“旧版”库：与引入 user_version 之前的实现完全一致（只建表、不写版本号）
+	{
+		sqlite3 *raw = nullptr;
+		sqlite3_open_v2(legacy.c_str(), &raw,
+				SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr);
+		check(exec_raw(raw, "CREATE TABLE key_hourly (day TEXT NOT NULL, hour INTEGER NOT NULL, "
+						      "key TEXT NOT NULL, count INTEGER NOT NULL, "
+						      "PRIMARY KEY (day, hour, key)) WITHOUT ROWID;"),
+				"造旧库：建 key_hourly");
+		check(exec_raw(raw, "CREATE TABLE run_log (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+						      "started_at TEXT NOT NULL, ended_at TEXT, version TEXT NOT NULL, note TEXT);"),
+				"造旧库：建 run_log");
+		check(exec_raw(raw, "INSERT INTO key_hourly VALUES ('2026-01-02', 9, 'a', 4242);"),
+				"造旧库：塞入历史计数");
+		check(exec_raw(raw, "INSERT INTO run_log (started_at, version) "
+						      "VALUES ('2026-01-02 09:00:00', 'v0.0.0');"),
+				"造旧库：塞入一条运行记录");
+		sqlite3_close(raw);
+	}
+	check(raw_int(legacy, "PRAGMA user_version;") == 0, "旧库的 user_version 确实是 0");
+
+	{
+		kc::Store s;
+		check(s.open(legacy), "打开旧库（应当自动升级）");
+		check(s.schema_version() == 1, "升级后 schema_version = 1");
+		int64_t v = -1;
+		check(s.query_bucket("2026-01-02", 9, "a", &v) && v == 4242,
+				"升级没动数据：历史计数 4242 还在");
+		std::vector<std::pair<std::string, std::string>> runs;
+		check(s.recent_runs(5, &runs) && runs.size() == 1, "升级没动数据：运行记录还在");
+		s.close();
+	}
+	check(raw_int(legacy, "PRAGMA user_version;") == 1, "库里真的写上了 user_version=1");
+
+	// 反向：库比程序新 → 必须拒绝打开（宁可报错，不要假装）
+	const std::string future = "test_store_future.db";
+	remove_db_files(future);
+	{
+		sqlite3 *raw = nullptr;
+		sqlite3_open_v2(future.c_str(), &raw,
+				SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr);
+		exec_raw(raw, "CREATE TABLE key_hourly (day TEXT NOT NULL, hour INTEGER NOT NULL, "
+				      "key TEXT NOT NULL, count INTEGER NOT NULL, "
+				      "PRIMARY KEY (day, hour, key)) WITHOUT ROWID;");
+		exec_raw(raw, "PRAGMA user_version=999;");
+		sqlite3_close(raw);
+	}
+	{
+		kc::Store s;
+		check(!s.open(future), "拒绝打开「结构版本更新」的库");
+		check(s.last_error().find("999") != std::string::npos,
+				"错误信息里带上实际版本号（便于排查）");
+		check(!s.is_open(), "拒绝之后没留下半开状态");
+	}
+
+	remove_db_files(legacy);
+	remove_db_files(future);
+}
+
 } // namespace
 
 int main() {
@@ -161,6 +254,9 @@ int main() {
 
 	// ---------- 3) 表结构不变量 ----------
 	check_schema_has_no_content_columns();
+
+	// ---------- 3.5) 存储结构版本与迁移 ----------
+	check_schema_version_migration();
 
 	// ---------- 4) run_log：能看出「昨天其实没在跑」----------
 	{

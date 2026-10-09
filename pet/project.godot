@@ -24,3 +24,11 @@ window/per_pixel_transparency/allowed=true
 # 必须用 Compatibility：本机实测 Vulkan/Forward+ 下透明窗口会变成纯黑方块
 renderer/rendering_method="gl_compatibility"
 viewport/transparent_background=true
+
+[keycount]
+# 本工程的版本号（方案 F：v0.1.日期）。发布流程会在导出前把它覆盖成真 tag，
+# 本地开发就是 dev。它会被写进 run_log.version —— 回答「这些计数是哪个版本写的」。
+version="dev"
+# 为什么不用 application/config/version：实测 4.7.2 下那个键读出来是空串（被当成内置默认值）。
+# 坑：本文件（project.godot）的注释里**不能出现等号** —— 实测 Godot 4.7.2 会报
+#     Error parsing ...: Expected value, got 'ERROR' File might be corrupted，整个项目加载不了。

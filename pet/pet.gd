@@ -8,7 +8,10 @@ extends Node2D
 const LOG_PATH := "user://run.log"           # 日志放 user://：导出版不会在 exe 旁边留文件，装进 Program Files 也能写
 const LOG_MAX_BYTES := 1_000_000             # 超过就轮转，只留 1 份旧日志（不轮转时实测长到过 80MB）
 const DB_PATH := "user://keycount.db"       # 存 %APPDATA%\Godot\app_userdata\<项目名>\
-const VERSION := "v1"
+# 版本：发布流程会把 project.godot 的 keycount/version 注入成 tag（方案 F：v0.1.日期）。
+# 本地开发就是 "dev"。它写进 run_log.version —— 回答"这些计数是哪个版本写的"。
+# （不用 application/config/version：实测 4.7.2 下那个键读出来是空串。）
+var VERSION := "dev"
 
 const FLUSH_INTERVAL := 10.0                 # 最长 10 秒落一次盘
 const FLUSH_EVENTS := 200                    # 或攒够 200 下就落
@@ -95,6 +98,9 @@ func _ready() -> void:
 	_log = FileAccess.open(LOG_PATH, FileAccess.WRITE)
 
 	var wall := _stamp()
+	VERSION = str(ProjectSettings.get_setting("keycount/version", "dev"))
+	if VERSION.is_empty():
+		VERSION = "dev" # 空串等于没版本号，宁可显示 dev（别在库里留空白）
 	_logline("启动 %s  版本 %s" % [wall, VERSION])
 
 	hwnd = DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE, 0)

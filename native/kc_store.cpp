@@ -3,6 +3,30 @@
 
 #include "sqlite3.h"
 
+namespace {
+// 当前存储结构版本（写在 SQLite 内建的 PRAGMA user_version 里，跟事务一起提交）。
+// 0 = 本字段引入之前建的库（旧版用户手里的库）。
+constexpr int kSchemaVersion = 1;
+
+const char *kCreateKeyHourly =
+		"CREATE TABLE IF NOT EXISTS key_hourly ("
+		"  day   TEXT    NOT NULL," // 'YYYY-MM-DD' 本地时区
+		"  hour  INTEGER NOT NULL," // 0..23 本地时区
+		"  key   TEXT    NOT NULL," // 归一化键名，见 kc_hook.cpp
+		"  count INTEGER NOT NULL,"
+		"  PRIMARY KEY (day, hour, key)"
+		") WITHOUT ROWID;";
+
+const char *kCreateRunLog =
+		"CREATE TABLE IF NOT EXISTS run_log ("
+		"  id         INTEGER PRIMARY KEY AUTOINCREMENT,"
+		"  started_at TEXT NOT NULL,"
+		"  ended_at   TEXT," // NULL = 那次没正常结束（被强杀/断电）
+		"  version    TEXT NOT NULL,"
+		"  note       TEXT"
+		");";
+} // namespace
+
 namespace kc {
 
 Store::~Store() {
@@ -32,6 +56,22 @@ bool Store::prepare(const char *sql, sqlite3_stmt **stmt_out) {
 	return true;
 }
 
+bool Store::scalar_int(const char *sql, int *out) {
+	sqlite3_stmt *stmt = nullptr;
+	if (!prepare(sql, &stmt)) {
+		return false;
+	}
+	bool ok = false;
+	if (sqlite3_step(stmt) == SQLITE_ROW) {
+		*out = sqlite3_column_int(stmt, 0);
+		ok = true;
+	} else {
+		last_error_ = sqlite3_errmsg(db_);
+	}
+	sqlite3_finalize(stmt);
+	return ok;
+}
+
 bool Store::open(const std::string &path) {
 	close();
 	if (sqlite3_open_v2(path.c_str(), &db_,
@@ -47,36 +87,44 @@ bool Store::open(const std::string &path) {
 
 	// WAL：崩溃/断电后能恢复到最后一个已提交事务；同时允许外部工具并发读
 	if (!exec("PRAGMA journal_mode=WAL;")) {
-		return false;
+		return abort_open();
 	}
 	// NORMAL 在 WAL 下仍然保证事务原子性，只在极端断电时可能丢最后若干事务
 	if (!exec("PRAGMA synchronous=NORMAL;")) {
-		return false;
+		return abort_open();
 	}
 	// 宠物在写、命令行在读的时候不要立刻报 SQLITE_BUSY
 	if (!exec("PRAGMA busy_timeout=3000;")) {
-		return false;
+		return abort_open();
 	}
-	if (!exec(
-			    "CREATE TABLE IF NOT EXISTS key_hourly ("
-			    "  day   TEXT    NOT NULL," // 'YYYY-MM-DD' 本地时区
-			    "  hour  INTEGER NOT NULL," // 0..23 本地时区
-			    "  key   TEXT    NOT NULL," // 归一化键名，见 kc_hook.cpp
-			    "  count INTEGER NOT NULL,"
-			    "  PRIMARY KEY (day, hour, key)"
-			    ") WITHOUT ROWID;")) {
-		return false;
+	// ---- 存储结构版本 ----
+	// 先读：库比程序新时必须**拒绝**，绝不能按旧结构往上写。
+	int found = 0;
+	if (!scalar_int("PRAGMA user_version;", &found)) {
+		return abort_open();
 	}
-	if (!exec(
-			    "CREATE TABLE IF NOT EXISTS run_log ("
-			    "  id         INTEGER PRIMARY KEY AUTOINCREMENT,"
-			    "  started_at TEXT NOT NULL,"
-			    "  ended_at   TEXT," // NULL = 那次没正常结束（被强杀/断电）
-			    "  version    TEXT NOT NULL,"
-			    "  note       TEXT"
-			    ");")) {
-		return false;
+	if (found > kSchemaVersion) {
+		last_error_ = "库的存储结构版本是 " + std::to_string(found) + "，比本程序认识的 " +
+				std::to_string(kSchemaVersion) + " 新；请升级程序（拒绝按旧结构写这个库）";
+		return abort_open();
 	}
+
+	// 建表 + 记版本号放**同一个事务**：要么都成、要么都不成（不留半套结构）。
+	// 以后改结构就在这里加 `if (found < 2) { ...迁移... }`，并补一条 test_store 断言。
+	const std::string set_version = "PRAGMA user_version=" + std::to_string(kSchemaVersion) + ";";
+	if (!exec("BEGIN IMMEDIATE;")) {
+		return abort_open();
+	}
+	if (!exec(kCreateKeyHourly) || !exec(kCreateRunLog) || !exec(set_version.c_str())) {
+		const std::string why = last_error_; // 先记下真正的失败原因，别被回滚覆盖
+		exec("ROLLBACK;");
+		last_error_ = why;
+		return abort_open();
+	}
+	if (!exec("COMMIT;")) {
+		return abort_open();
+	}
+	schema_version_ = kSchemaVersion;
 	return true;
 }
 
@@ -86,6 +134,7 @@ void Store::close() {
 		db_ = nullptr;
 	}
 	current_run_id_ = 0;
+	schema_version_ = 0;
 }
 
 bool Store::is_open() const {

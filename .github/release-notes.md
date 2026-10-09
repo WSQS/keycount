@@ -20,10 +20,12 @@
 1. **背景必须透明，不能是黑方块** —— 这条最容易漏（发布流程第一次跑时我就漏了）：
    看宠物四周四角是不是能看到后面的窗口。如果是一整块黑，说明渲染器起了 Vulkan。
    本包已带 `override.cfg`，**不要把它删掉**（删了双击 exe 就会变黑方块）。
-2. 启动后 `GetGUIThreadInfo` 的 `hwndFocus` 不是宠物（`agent-test/fg2.ps1`）
-3. 钩子抓得到键：今日总数会涨；`run.log` 里有 `hook.start() -> true`
-4. 库仍在 `%APPDATA%\Godot\app_userdata\keycount pet\`（历史不丢）
-5. 再起一个实例会自己退出（不会把计数翻倍）
-6. 拖动跟手（左键按住宠物本体拖）
+2. **版本号要对**：`user://run.log` 第一行的「版本」应当等于这个 tag（方案 F：v0.1.日期）。
+   如果是 `dev`，说明版本没注入进包（查 `override.cfg` 里的 `[keycount] version`）。
+3. 启动后 `GetGUIThreadInfo` 的 `hwndFocus` 不是宠物（`agent-test/fg2.ps1`）
+4. 钩子抓得到键：今日总数会涨；`run.log` 里有 `hook.start() -> true`
+5. 库仍在 `%APPDATA%\Godot\app_userdata\keycount pet\`（历史不丢）
+6. 再起一个实例会自己退出（不会把计数翻倍）
+7. 拖动跟手（左键按住宠物本体拖）
 
 `run.log` 与 `run.log.1`（1MB 轮转）在该目录下；发布版不写逐键行，只写状态行。

@@ -105,6 +105,21 @@ jobs:
           mv extension_api.json gdext/api/extension_api.json
           wc -c gdext/api/extension_api.json
 
+      - name: 项目能被 Godot 解析（project.godot 写坏要在这里红）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 实测踩过：project.godot 的注释里出现等号 ⇒ Godot 报
+          # "Error parsing ...: Expected value, got 'ERROR'"，整个项目加载不了，
+          # 而导出本身却可能“看起来成功” ⇒ 所以单独断言一下。
+          godot=./.ci/godot/Godot_v${GODOT_VERSION}-stable_win64_console.exe
+          out=$("$godot" --headless --quit-after 10 --path pet 2>&1 || true)
+          if printf '%s' "$out" | grep -q 'Error parsing'; then
+            printf '%s\n' "$out" | grep -A2 'Error parsing' | sed 's/^/     /'
+            echo "project.godot 解析失败（注释里不能有等号）"; exit 1
+          fi
+          echo "project.godot 解析正常"
+
       - name: 编扩展（debug + release）
         shell: bash
         run: |
@@ -122,6 +137,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # ---- 版本号注入（方案 F：v0.1.YYYYMMDD，PATCH = 日期）----
+          # 唯一事实源是 git tag；push 到 main 的构建**不是发布**，用 sha-<7>（不占版本号）
+          if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            VERSION="$GITHUB_REF_NAME"
+            mmdd=$(printf '%s' "$VERSION" | grep -oE '[0-9]{8}$' | cut -c5-8 || true)
+          else
+            VERSION="sha-${GITHUB_SHA::7}"
+          fi
+          [ -n "${mmdd:-}" ] || mmdd=$(date +%m%d)
+          # Windows 的 FileVersion 是 4 个 16 位数（≤65535），装不下 20261009 ⇒ 映射成 MMDD
+          FILEVER="0.1.${mmdd}.0"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # 用 [keycount] 段里的 version（不是 application/config/version：实测那个键读出来是空串）
+          sed -i "s|^version=.*|version=\"$VERSION\"|" pet/project.godot
+          sed -i "s|^application/product_version=.*|application/product_version=\"$VERSION\"|;s|^application/file_version=.*|application/file_version=\"$FILEVER\"|" pet/export_presets.cfg
+          echo "注入版本: keycount/version=$VERSION  file_version=$FILEVER"
+          grep -n '^version=' pet/project.godot
           # 注意：pet/addons/keycount/bin/ 是 gitignore 的（dll 是构建产物），干净检出里**不存在**
           mkdir -p pet/addons/keycount/bin
           cp gdext/bin/*.dll pet/addons/keycount/bin/
@@ -132,15 +164,26 @@ jobs:
           # 导出目标必须是 **Windows 路径**：Git Bash 的 $(pwd) 是 /d/a/...，原生 Godot 不认
           out=$(python -c "import os;print(os.path.abspath('dist/keycount.exe'))")
           "$godot" --headless --path pet --export-release "Windows Desktop" "$out"
+          # 断言版本真的进了包（project.binary 里是明文字符串）：注入失败要在这里红，而不是静默出个 dev 包
+          grep -aq "$VERSION" dist/keycount.exe || { echo "exe 里找不到版本串 '$VERSION' —— 注入没生效"; exit 1; }
+          echo "已确认 exe 内嵌 project.binary 带着版本串：$VERSION"
           ls -la dist/
 
       - name: 组装发布包（+ sha256）
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $version = if ($env:GITHUB_REF -like "refs/tags/*") { $env:GITHUB_REF_NAME } else { "sha-$($env:GITHUB_SHA.Substring(0,7))" }
-          "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV
+          # 版本号由上一个步骤注入（tag→v0.1.YYYYMMDD / push→sha-xxxxxxx），这里只管打包
+          $version = $env:VERSION
+          if (-not $version) { throw "VERSION 环境变量为空（版本注入那步没跑？）" }
           Copy-Item packaging/start.cmd, packaging/start.ps1, packaging/README.txt, packaging/override.cfg dist/
+          # 版本号也写进 override.cfg：实测导出版**读不到 pck 里的自定义键**，只认 exe 旁边的这个文件。
+          # （渲染器那次同一条结论；所以“导出版要用的配置”都放这里）
+          (Get-Content dist/override.cfg -Raw).Replace('version="dev"', "version=`"$version`"") |
+            Set-Content dist/override.cfg -NoNewline
+          if (-not (Select-String -Path dist/override.cfg -Pattern ([regex]::Escape($version)) -Quiet)) {
+            throw "override.cfg 里没写上版本号 $version"
+          }
           (Get-Content dist/README.txt -Raw).Replace("__VERSION__", $version) | Set-Content dist/README.txt -NoNewline
           # 透明那一条必须人工看：CI 断言不了（实测踩过：包里的渲染器设置不生效 ⇒ 黑方块）
           if (-not (Test-Path dist/override.cfg)) { throw "dist/ 里没有 override.cfg —— 双击 exe 会变黑方块" }

@@ -321,6 +321,60 @@ debug dll ⇒ **release 这条链从来没被碰过**。所以 CI 必须 debug +
 （挪窗 + 四角像素对比；退出码 0=透明 / 1=黑方块 / 2=找不到窗口）。
 这条**CI 断言不了**（要真实桌面），已写进 release 说明里的手验清单第 1 条。
 
+## 版本管理（2026-10-09 定案）
+
+### 三种「版本」分开走
+
+| 类别 | 回答什么 | 载体 | 变化频率 |
+|---|---|---|---|
+| **发布版本** | 用户/依赖者看：`v0.1.20261009` | git tag（唯一事实源） | 每天 |
+| **应用自报版本** | 「这些计数是哪个版本写的」（诊断） | `keycount/version` → 日志 + `run_log.version` | 每次发版 |
+| **存储结构版本** | 数据能不能被这个程序安全读写 | `PRAGMA user_version` | 几个月一次 |
+
+**为什么不能混**：发布号天天变、结构几个月才动、自报版本每次都要变但**不值得改代码**。
+混在一起最坏的后果：结构悄悄变了而发布号没动 ⇒ **静默写坏用户的计数历史**（用户已经积累了几千下）。
+
+### 方案 F：`vMAJOR.MINOR.YYYYMMDD`
+
+- PATCH 用日期（`v0.1.20261009`）⇒ 发得再勤也不用想号，且**单调递增**（semver 合法，
+  `0.1.20261010 > 0.1.20261009`）。不用 `0.1.0_1009` 这种写法：非 semver、排序歧义
+  （`0.1.0_1010` 和 `0.1.1_1009` 谁新？）。
+- `0.x` 阶段：破坏性变更（结构/键名/口径）进 MINOR（`0.2.*`）；预发布用 `-rc.N`。
+- **push 到 main 的构建不是发布**：artifact 名用 `sha-<7位>`，不占版本号。
+
+### 注入链（唯一事实源 = tag）
+
+| 落到哪 | 谁写 | 用途 |
+|---|---|---|
+| `pet/project.godot` 的 `[keycount] version` | CI `sed`（只改工作区，不提交） | 开发/本地跑（实测读它 ✔） |
+| `dist/override.cfg` 的 `[keycount] version` | CI | **导出版读它**（实测 ✔） |
+| preset 的 `product_version` / `file_version` | CI | exe 属性页（实测 `ProductVersion=v0.1.20261009`、`FileVersion=0.1.1009.0`） |
+| zip 名 / `README.txt` | CI | 用户一眼看到版本 |
+| `run_log.version` | 宠物自己（读 `keycount/version`） | 数据溯源 |
+
+### 三个实测的坑（都踩过）
+
+1. **`project.godot` 的注释里不能出现等号**。实测 4.7.2 会报
+   `Error parsing ...: Expected value, got 'ERROR' File might be corrupted`，**整个项目加载不了**
+   （注释是否以 `#` 开头都一样）。判据：build 工作流里有一条直接跑一次 Godot 抳这个错。
+   （我当时就是因为这个把宠物搞成“无日志、不开库”，查了好几轮。）
+2. **`application/config/version` 读出来是空串**（`has_setting=true`，但值被当成内置默认）
+   ⇒ 换自己的键 `keycount/version`。
+3. **导出版读不到 pck 里的自定义键**（实测：注入后 exe 里有那个串，但运行时拿到默认值）
+   ⇒ 版本号也走 `override.cfg`。**结论：导出版要用的配置放 exe 旁边最可靠**（与渲染器那次同一条结论）。
+
+### 存储结构版本（与发布号解耦）
+
+- 存在 SQLite 内建的 `PRAGMA user_version`（跟事务一起提交，无额外依赖）。
+- `open()`：先读；**比程序新就拒绝打开**（“请升级程序”，不给旧结构写坏数据的机会）；
+  否则在同**一个事务**里建表 + 写版本号。以后改结构就加 `if (found < N+1) { 迁移 }`。
+- 断言在 `native/test_store.cpp`（现 52 条）：旧库自动升级且数据还在 / 库比程序新时拒绝打开
+  且**不留半开状态**——最后这条当时真抓到一个 bug（`open()` 失败却没关连接）。
+- 本机用户的真库已从 `user_version=0` 迁到 `1`：计数一条没少（5684 下 ✔）。
+
+**判据**：`native/test_store.exe`（52 条断言）；`godot --headless --quit-after 10 --path pet`
+的输出里不得有 `Error parsing`；发布时看 `user://run.log` 首行的版本号是否等于 tag。
+
 ## native/ 平台核心：已实现并验证
 
 `native/kc_hook.h` / `kc_hook.cpp` / `test_hook.cpp` —— **不依赖 Godot 的纯 C++**（只用 Win32 + 
