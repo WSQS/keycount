@@ -18,6 +18,10 @@ const FLUSH_EVENTS := 200                    # 或攒够 200 下就落
 const SLEEPY_AFTER := 180.0                  # 静默多久打瞌睡
 const EXCITED_KPM := 400.0                   # 多快算兴奋
 
+# 点击穿透的口径：距窗口中心这个半径内算「宠物本体」（可点、可拖）；外面（那圈透明角）
+# 让鼠标穿透到下面的窗口。拖动命中判定用的也是它 —— 一个口径只写一处。
+const INTERACT_RADIUS := 90.0
+
 var hook: KeyCountHook
 var win: KeyCountWindow
 var store: KeyCountStore
@@ -44,6 +48,7 @@ var _log_t: float = 0.0
 var _focus_true_frames: int = 0
 var _input_key_count: int = 0
 var _dragging: bool = false
+var _click_through: bool = false            # 当前窗口是否处于「穿透」状态（只在变化时才改样式）
 var _drag_offset: Vector2i = Vector2i.ZERO   # 抓取点相对窗口左上角的偏移（绝对坐标法用）
 var _db_ok: bool = false
 
@@ -218,6 +223,7 @@ func kpm() -> float:
 func _process(_delta: float) -> void:
 	if hook != null:
 		hook.poll()
+	_update_click_through()
 	if get_window().has_focus():
 		_focus_true_frames += 1
 
@@ -243,13 +249,34 @@ func _process(_delta: float) -> void:
 
 	if now - _log_t >= 1.0:
 		_log_t = now
-		_logline("ALIVE state=%s total=%d kpm=%.0f idle=%.0fs pending=%d/%d focused=%s input_keys=%d db=%s" % [
+		_logline("ALIVE state=%s total=%d kpm=%.0f idle=%.0fs pending=%d/%d focused=%s input_keys=%d db=%s through=%s" % [
 			state_name, today_total, rate, idle_for,
 			_pending.size(), _pending_events,
 			str(get_window().has_focus()), _input_key_count,
-			"ok" if _db_ok else "FAIL",
+			"ok" if _db_ok else "FAIL", str(_click_through),
 		])
 	queue_redraw()
+
+# 点击穿透：光标在「宠物本体」内时窗口可点；在透明角上时开 WS_EX_TRANSPARENT，
+# 让鼠标落到下面的窗口（光标下面是什么就点什么）。
+#
+# 为什么要自己每帧判：Windows 下 WS_EX_TRANSPARENT 是**整窗**生效的（开了就拖不动宠物），
+# 而 Godot 内置的 mouse_passthrough_polygon 在 Windows 上**不**穿透到别的进程（SPEC 有实测）。
+# 拖动过程中强制保持可点：不然光标一出圈窗口就不再收鼠标，拖动会断。
+func _update_click_through() -> void:
+	if win == null or hwnd == 0:
+		return
+	var want := true
+	if _dragging:
+		want = false
+	else:
+		var local := DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
+		want = local.distance_to(get_viewport_rect().size / 2.0) > INTERACT_RADIUS
+	if want == _click_through:
+		return # 只在变化时改样式（SetWindowLongPtr 不值得每帧调）
+	_click_through = want
+	if not win.set_click_through(hwnd, want):
+		_logline("!! 设置点击穿透失败（want=%s）" % str(want))
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
@@ -274,7 +301,7 @@ func _shutdown() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			if event.position.distance_to(get_viewport_rect().size / 2.0) < 90.0:
+			if event.position.distance_to(get_viewport_rect().size / 2.0) < INTERACT_RADIUS:
 				_dragging = true
 				# 绝对坐标：记下抓取点相对窗口左上角的偏移，之后每次直接把窗口摆到
 				# “光标 - 偏移”。不能累加 event.relative —— 我们在移动自己所在的窗口，

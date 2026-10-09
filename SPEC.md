@@ -375,6 +375,40 @@ debug dll ⇒ **release 这条链从来没被碰过**。所以 CI 必须 debug +
 **判据**：`native/test_store.exe`（52 条断言）；`godot --headless --quit-after 10 --path pet`
 的输出里不得有 `Error parsing`；发布时看 `user://run.log` 首行的版本号是否等于 tag。
 
+## 点击穿透：自己按帧切样式（实测 2026-10-09）
+
+口径：**距窗口中心 `INTERACT_RADIUS`（90px）内算「宠物本体」**——可点、可拖、可单击看报表；
+外面那圈透明角让鼠标**穿透到下面的窗口**。拖动命中判定用的是同一个常量（一个口径只写一处）。
+
+实现：`pet.gd` 每帧按光标位置调 `KeyCountWindow.set_click_through(hwnd, on)`（扩展里就是
+`WS_EX_LAYERED | WS_EX_TRANSPARENT`）。
+
+为什么必须自己判、不能用内置的：
+
+- Godot 的 `mouse_passthrough_polygon` 在 Windows 上**不**穿透到别的进程（前面已实测）；
+- `WS_EX_TRANSPARENT` 是**整窗**生效的：一直开着就再也拖不动宠物；
+- 穿透状态下窗口收不到鼠标消息 ⇒ **只能每帧轮询**（这一层非做轮询的唯一原因）；
+- 拖动过程中强制保持「可点」：不然光标一出圈窗口就不再收鼠标，拖动会断。
+
+实测：
+
+| 项 | 结果 |
+|---|---|
+| 切换延迟 | 进圈 0～11ms、出圈 0～18ms（就是一帧） |
+| 圆内 5 个采样点 | `WindowFromPoint` = 宠物（可点） |
+| 圆外 4 方向 + 两个窗口角 | `WindowFromPoint` = 下面的窗口（穿透） |
+| 穿透开着时透明是否还正常 | ✅ 四角像素挪窗前后 **0%** 不同（LAYERED 不影响 per-pixel alpha 合成） |
+| 拖动 | 跟随比 **100%**（穿透开关没打断拖动） |
+| 焦点 | 仍不抢焦点（`hwndFocus` 是别的窗口） |
+
+`user://run.log` 的 ALIVE 行多了个 `through=true/false`，就是当前这个状态（便于事后排查）。
+
+**判据**：`powershell -File agent-test/clickthrough-test.ps1 -Proc godot.windows.opt.tools.64`
+（发布包用默认的 `keycount`）。它把光标挪到 11 个采样点，用 `WindowFromPoint` 断言
+「这一点上鼠标会落到谁身上」——`WindowFromPoint` 会**跳过** `WS_EX_TRANSPARENT` 的窗口，
+正好就是这个语义。每个点要求 **300ms 内**切到位（实测 0～18ms，留足余量）并打印实测耗时。
+退出码 0/1/2。这条判据**要真实桌面**（CI 里做不了，与透明性那条同类）。
+
 ## native/ 平台核心：已实现并验证
 
 `native/kc_hook.h` / `kc_hook.cpp` / `test_hook.cpp` —— **不依赖 Godot 的纯 C++**（只用 Win32 + 
