@@ -33,10 +33,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # godot-cpp 编译产物很贵（1091 个编译单元），按 PIN 缓存；源码也在里面
+      # godot-cpp 编译产物很贵（1091 个编译单元），按 PIN 缓存；源码也在里面。
+      # .sconsign.dblite 必须一起缓存：没有它 scons 无法判定目标是最新的，会全量重编
+      # （实测：只缓存 godot-cpp 目录时，日志里仍有 **2194 行 Compiling**，等于没缓存）
       - uses: actions/cache@v4
         with:
-          path: gdext/godot-cpp
+          path: |
+            gdext/godot-cpp
+            gdext/.sconsign.dblite
           key: godot-cpp-${{ env.GODOT_CPP_PIN }}-${{ runner.os }}
       # Godot 编辑器 + 导出模板（只取 windows 成员，约 300MB）
       - uses: actions/cache@v4
