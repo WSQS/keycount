@@ -118,6 +118,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # 注意：pet/addons/keycount/bin/ 是 gitignore 的（dll 是构建产物），干净检出里**不存在**
+          mkdir -p pet/addons/keycount/bin
           cp gdext/bin/*.dll pet/addons/keycount/bin/
           godot=./.ci/godot/Godot_v${GODOT_VERSION}-stable_win64_console.exe
           # 过一遍导入：没有 .godot/extension_list.cfg 时扩展不会被登记
