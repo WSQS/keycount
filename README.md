@@ -118,6 +118,16 @@ uv run --no-project python tools/keycount.py runs    # 能看出有没有没正�
 
 两处不一致是有意的，不是遗漏。
 
+### 许可证
+
+本仓库原创部分：[MIT](LICENSE)。第三方如下：
+
+| 组件 | 许可 | 说明 |
+|---|---|---|
+| `thirdparty/sqlite/` | Public Domain | SQLite amalgamation，版本记在 `thirdparty/sqlite/PIN.txt` |
+| `godot-cpp` | MIT | **不进仓库**，只记 commit 在 `gdext/GODOT_CPP_PIN.txt` |
+| `sopho-nook/pi/extensions/subagent/` | MIT | 改编自 [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) v0.87.1 自带的 subagent 扩展（上游同为 MIT） |
+
 ## 两条容易踩的坑
 
 1. **渲染器必须是 `gl_compatibility`。** 本机实测 Vulkan/Forward+ 下透明窗口会渲染成**纯黑方块**，
