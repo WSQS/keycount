@@ -42,6 +42,14 @@ def default_dest() -> Path:
 
 
 def main() -> int:
+    # Windows 上 Python 的 stdout 默认是 cp1252，打印中文会 UnicodeEncodeError（CI 上实测炸过）。
+    # 这里先自己兜底，workflow 里另外设了 PYTHONUTF8=1。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True, help="例如 4.7.2")
     ap.add_argument("--tpz", help="已下好的 .tpz；不给就从 GitHub 下（1.28GB）")
