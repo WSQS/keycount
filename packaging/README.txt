@@ -32,6 +32,13 @@ keycount pet  __VERSION__  (Windows x64)
 它就是 GitHub Actions 从这份源码构建出来的，自建请见：
   https://github.com/WSQS/keycount
 
+如果宠物周围是一整块黑（不是透明）：
+------------------------------------------------
+说明渲染器起了 Vulkan（Vulkan 下透明窗口会变成黑方块）。两件事：
+1. 确认 `override.cfg` 与 `keycount.exe` 在**同一个文件夹**（它是用来把渲染器拉回
+   OpenGL Compatibility 的，删了就会变黑方块）
+2. 或者用 `start.cmd` 启动（它另外显式传了 `--rendering-driver opengl3`）
+
 操作
 ------------------------------------------------
 - 左键按住宠物拖动

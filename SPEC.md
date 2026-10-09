@@ -237,7 +237,7 @@ DisplayServer.window_set_position(DisplayServer.mouse_get_position() - _drag_off
 |---|---|
 | 产物 | `dist/keycount.exe`（104MB 模板 + **12KB 内嵌 pck**）+ `keycount.windows.template_release.x86_64.dll`（同级） |
 | 扩展加载 | `hook.start() -> true`；`set_no_activate -> true`、`ex_style : noactivate=1 toolwindow=1` |
-| 透明 | 截图确认：圆浮在别的窗口上、四角**穿透**，不是黑方块 |
+| 透明 | ⚠️ **默认启动会变黑方块**（实测见下）：裸启动起 `Vulkan - Forward+`，四角像素挪窗前 82.5% 不同、挪前平均亮度 **0**（纯黑）；加 `override.cfg` 或 `--rendering-driver opengl3` 后：`OpenGL API 3.3 - Compatibility`，四角 **0%** 不同、亮度 42 ⇒ 透明正常 |
 | **不抢焦点** | `fg2.ps1` → `hwndFocus` 是别的窗口；日志 `prev_foreground=0x11611F8 ≠ hwnd`、`第一帧 restore_prev_foreground -> true`、`focused=false`、`input_keys=0` ⇒ **启动器在导出版里同样必需且有效** |
 | DB 路径 | 与开发版**同一个** `user://keycount.db`（日志：「库里已有 4041 下」，同一次运行涨到 4148） |
 | 钩子 / 不翻倍 | 109 条 KEY 行 ↔ 总数 +107（≈1:1，不是 2:1） |
@@ -289,6 +289,37 @@ debug dll ⇒ **release 这条链从来没被碰过**。所以 CI 必须 debug +
 
 **判据**：`pet/export_presets.cfg` + 导出命令；然后按上表逐条验 —— 扩展加载看 `user://run.log` 的
 `hook.start() -> true`，不抢焦点看 `agent-test/fg2.ps1`，DB 看 `tools/keycount.py today`。
+
+### 坑：导出版里工程设置的渲染器**不生效** ⇒ 黑方块（实测 2026-10-09）
+
+先把事实摆全（全部实测，不是推测）：
+
+| 实测项 | 结果 |
+|---|---|
+| `pet/project.godot` | `renderer/rendering_method="gl_compatibility"` ✅ |
+| 导出包里 `project.binary` | **字节级确认含 `rendering_method` 且值就是 `gl_compatibility`**（不是 `.mobile` 变体）✅ |
+| 裸启动导出版 | `Vulkan 1.3.289 - Forward+` + 四角像素挪窗前 82.5% 不同、平均亮度 **0** ⇒ **黑方块** ❌ |
+| 运行时 `ProjectSettings.get_setting("rendering/renderer/rendering_method")` | **`forward_plus`**（不是包里的值）|
+| 旁边放 `override.cfg`（同一个键）| `OpenGL API 3.3.0 - Compatibility` + 四角 0% 不同、亮度 42 ⇒ 透明 ✅ |
+| 启动器传 `--rendering-driver opengl3` | 同上 ✅ |
+| 导出时传 `--rendering-method gl_compatibility` | **仍然 Vulkan**（不管用）❌ |
+
+结论：**包里的配置是对的，但导出版（embedded pck）启动时没采用它**（运行时看到的是默认值
+`forward_plus`）。引擎内部确切原因未定位（`rendering_method` 在 `main.cpp` 里被读的位置很早，
+而 `override.cfg` 这种**外部**文件能生效——两者区别就在这里）。
+
+⇒ 发版时两条一起上（已写进 `packaging/`）：
+
+1. 随包放 **`override.cfg`**（内容就一行 `renderer/rendering_method="gl_compatibility"`）——
+   这是让「双击 exe」也正常的唯一办法；build.yml 里还断言了它必须在 dist/ 里。
+2. 启动器 **`--rendering-driver opengl3`**（与开发期 `run-pet.ps1` 的做法一致）。
+
+**为什么会一直没发现**：开发期一直用启动器（传了 driver），所以从来没碰到过；
+而首次发布流程时我用**肉眼看截图**下了“透明正常”的结论 —— 后来用像素测量才推翻。
+
+**判据**：`powershell -File agent-test/transparency-test.ps1 [-Proc <进程名>]`
+（挪窗 + 四角像素对比；退出码 0=透明 / 1=黑方块 / 2=找不到窗口）。
+这条**CI 断言不了**（要真实桌面），已写进 release 说明里的手验清单第 1 条。
 
 ## native/ 平台核心：已实现并验证
 

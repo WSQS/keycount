@@ -27,5 +27,9 @@ $prev = [KcFgHelper]::GetForegroundWindow().ToInt64()
 # 传给宠物：它读 KC_PREV_FOREGROUND，把焦点还回去。格式 0xHHHH（strtoull base 0）
 $env:KC_PREV_FOREGROUND = ("0x{0:X}" -f $prev)
 
-Start-Process -FilePath $exe
+# 为什么还要显式指定渲染器：实测（2026-10-09）导出版会忽略包里的
+# renderer/rendering_method，仍起 Forward+/Vulkan，而 Vulkan 下透明窗口是**黑方块**。
+# 随包的 override.cfg 已经能拉回来，这里再显式传一次，双保险
+# （开发期 agent-test/run-pet.ps1 一直是这么做的，所以开发时没暴露这个问题）。
+Start-Process -FilePath $exe -ArgumentList @("--rendering-driver", "opengl3")
 Write-Host ("keycount pet 已启动（前置窗口 0x{0:X}）" -f $prev)

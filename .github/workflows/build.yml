@@ -136,8 +136,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $version = if ($env:GITHUB_REF -like "refs/tags/*") { $env:GITHUB_REF_NAME } else { "sha-$($env:GITHUB_SHA.Substring(0,7))" }
           "VERSION=$version" | Out-File -Append -FilePath $env:GITHUB_ENV
-          Copy-Item packaging/start.cmd, packaging/start.ps1, packaging/README.txt dist/
+          Copy-Item packaging/start.cmd, packaging/start.ps1, packaging/README.txt, packaging/override.cfg dist/
           (Get-Content dist/README.txt -Raw).Replace("__VERSION__", $version) | Set-Content dist/README.txt -NoNewline
+          # 透明那一条必须人工看：CI 断言不了（实测踩过：包里的渲染器设置不生效 ⇒ 黑方块）
+          if (-not (Test-Path dist/override.cfg)) { throw "dist/ 里没有 override.cfg —— 双击 exe 会变黑方块" }
           $zip = "keycount-windows-x64-$version.zip"
           Compress-Archive -Path dist/* -DestinationPath $zip -Force
           (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() + "  $zip" | Set-Content "$zip.sha256"
