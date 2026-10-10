@@ -19,7 +19,7 @@ description: 在 keycount 仓库里改完东西后，怎么按层证明它真的
 |---|---|
 | `native/**`（钩子、存储、键名） | 1 |
 | `gdext/**`（接线层、SConstruct） | 1 → 2 |
-| `pet/**`（口径、状态机、窗口） | 1 → 2 → 3 → 4 → 5；交互改动另跑 `agent-test/drag-test.ps1` 与 `agent-test/clickthrough-test.ps1` |
+| `pet/**`（口径、状态机、窗口） | 1 → 2 → 3 → 4 → 5；交互改动另跑 `agent-test/drag-test.ps1` 与 `agent-test/clickthrough-test.ps1`；文字排版口径跑 `godot --headless --path pet --script test_text_fit.gd`（无需真实桌面，CI 里也跑） |
 | `sopho-nook/**` | 见 `sopho-nook/tools/criteria.sh` |
 
 ### 1. 核心自检（不需要 Godot，秒级）

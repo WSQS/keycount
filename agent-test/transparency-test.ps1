@@ -58,6 +58,25 @@ function Cap([int]$x, [int]$y, [int]$w, [int]$h) {
   return $b
 }
 
+# 只比「四角」：窗口的圆在中间，四角是纯透明区 —— 透明时它们应当完全跟着后面内容变。
+function CornerStats($imgA, $imgB, [int]$w, [int]$h, [int]$e) {
+  $diff = 0; $tot = 0; [double]$sA = 0; [double]$sB = 0
+  foreach ($cx in @(0, ($w - $e))) {
+    foreach ($cy in @(0, ($h - $e))) {
+      for ($i = 0; $i -lt $e; $i++) {
+        for ($j = 0; $j -lt $e; $j++) {
+          $pa = $imgA.GetPixel($cx + $i, $cy + $j); $pb = $imgB.GetPixel($cx + $i, $cy + $j)
+          $tot++
+          if ([Math]::Abs($pa.R - $pb.R) + [Math]::Abs($pa.G - $pb.G) + [Math]::Abs($pa.B - $pb.B) -gt 30) { $diff++ }
+          $sA += ($pa.R + $pa.G + $pa.B) / 3.0
+          $sB += ($pb.R + $pb.G + $pb.B) / 3.0
+        }
+      }
+    }
+  }
+  return @{ diff = $diff; tot = $tot; avgA = [Math]::Round($sA / $tot, 1); avgB = [Math]::Round($sB / $tot, 1) }
+}
+
 $hw = [TK]::Find($Proc)
 if ($hw -eq [IntPtr]::Zero) { Write-Output "找不到进程 $Proc 的可见窗口"; exit 2 }
 $parts = [TK]::R($hw).Split(",")
@@ -66,26 +85,25 @@ Write-Output ("窗口 {0},{1} {2}x{3}" -f $X, $Y, $W, $H)
 
 $a = Cap $X $Y $W $H
 $a.Save((Join-Path $OutDir "A.png")) | Out-Null
+
+# 前置：先确认「桌面没在动」。同一位置连拍两张，四角应当完全一致；
+# 不一致说明背景自己在变（实测踩过：活跃桌面下判据会假红 ❌，其实窗口是透明的）。
+Start-Sleep -Milliseconds 400
+$a2 = Cap $X $Y $W $H
+$jitter = (CornerStats $a $a2 $W $H 40).diff
+if ($jitter -gt 50) {
+  Write-Output ("⚠️ 桌面在动（四角有 {0} 个像素在 0.4s 内变了）—— 这次测不准（不是失败，请重跑）" -f $jitter)
+  exit 2
+}
+
 [TK]::Move($hw, $X + $Shift, $Y)
 Start-Sleep -Milliseconds 900
 $b = Cap $X $Y $W $H
 $b.Save((Join-Path $OutDir "B.png")) | Out-Null
 [TK]::Move($hw, $X, $Y)
 
-$e = 40; $diff = 0; $tot = 0; [double]$sumA = 0; [double]$sumB = 0
-foreach ($cx in @(0, ($W - $e))) {
-  foreach ($cy in @(0, ($H - $e))) {
-    for ($i = 0; $i -lt $e; $i++) {
-      for ($j = 0; $j -lt $e; $j++) {
-        $pa = $a.GetPixel($cx + $i, $cy + $j); $pb = $b.GetPixel($cx + $i, $cy + $j)
-        $tot++
-        if ([Math]::Abs($pa.R - $pb.R) + [Math]::Abs($pa.G - $pb.G) + [Math]::Abs($pa.B - $pb.B) -gt 30) { $diff++ }
-        $sumA += ($pa.R + $pa.G + $pa.B) / 3.0
-        $sumB += ($pb.R + $pb.G + $pb.B) / 3.0
-      }
-    }
-  }
-}
+$st = CornerStats $a $b $W $H 40
+$diff = $st.diff; $tot = $st.tot; $avgA = $st.avgA; $avgB = $st.avgB
 $avgA = [Math]::Round($sumA / $tot, 1); $avgB = [Math]::Round($sumB / $tot, 1)
 Write-Output ("四角 {0} 像素：挪窗前后不同处 {1} 个（{2}%）；平均亮度 A={3} B={4}（0=纯黑）" -f `
   $tot, $diff, ([Math]::Round(100.0 * $diff / $tot, 1)), $avgA, $avgB)

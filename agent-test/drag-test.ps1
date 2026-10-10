@@ -67,9 +67,14 @@ $steps = 300     # 每步 1px
 [DragTest]::mouse_event([DragTest]::LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 200
 # 连续拖：1px/1ms，共 (steps, steps) px —— 判据的关键形态，见文件头注释
+# 同时盯“光标有没有被真实鼠标抢走”：SetCursorPos 会被人的手覆盖（实测碰到过），
+# 那种情况不能判成“拖动跟丢”（假红），只能报“测不准”。
+$stolen = 0
 for ($i = 1; $i -le $steps; $i++) {
   [void][DragTest]::SetCursorPos($cx + $i, $cy + $i)
   Start-Sleep -Milliseconds 1
+  [void][DragTest]::GetCursorPos([ref]$pt)
+  if ([Math]::Abs($pt.X - ($cx + $i)) -gt 3 -or [Math]::Abs($pt.Y - ($cy + $i)) -gt 3) { $stolen++ }
 }
 [DragTest]::mouse_event([DragTest]::LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 400
@@ -79,15 +84,23 @@ $after = [DragTest]::Rect($hwnd)
 $dx = [int]$after.Split(",")[0] - $bL
 $dy = [int]$after.Split(",")[1] - $bT
 Write-Output "拖动后窗口矩形: $after"
-Write-Output ("光标位移 = ({0}, {1})   窗口位移 = ({2}, {3})   ⇒ 跟随比 = {4:P0}" -f $steps, $steps, $dx, $dy, ($dx / [double]$steps))
+$rx = $dx / [double]$steps; $ry = $dy / [double]$steps
+Write-Output ("光标位移 = ({0}, {1})   窗口位移 = ({2}, {3})   ⇒ 跟随比 = {4:P0}(x) / {5:P0}(y)" -f `
+  $steps, $steps, $dx, $dy, $rx, $ry)
 
 # 还原窗口位置，别把用户的宠物挪走
 [void][DragTest]::SetWindowPos($hwnd, [IntPtr]::Zero, [int]$orig.Split(",")[0], [int]$orig.Split(",")[1], 0, 0, [DragTest]::NOSIZE -bor [DragTest]::NOACTIVATE)
+
+# 先声明“测不准”：没把光标保持住就别下结论（宁可说测不准，也不要假红）
+if ($stolen -gt 30) {
+  Write-Output "⚠️ 拖动中有 $stolen / $steps 步光标被真实鼠标抢走 —— 这次测不准（不是失败，请别动鼠标重跑）"
+  exit 2
+}
 
 if ([Math]::Abs($dx - $steps) -le 5 -and [Math]::Abs($dy - $steps) -le 5) {
   Write-Output "跟随判据：窗口位移 ≈ 光标位移 ✅"
   exit 0
 } else {
-  Write-Output "跟随判据：窗口落后/抖动 ❌（光标走了 $steps px，窗口只走了 $dx px）"
+  Write-Output "跟随判据：窗口落后/抖动 ❌（光标走了 ($steps, $steps) px，窗口只走了 ($dx, $dy) px）"
   exit 1
 }

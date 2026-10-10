@@ -22,6 +22,13 @@ const EXCITED_KPM := 400.0                   # 多快算兴奋
 # 让鼠标穿透到下面的窗口。拖动命中判定用的也是它 —— 一个口径只写一处。
 const INTERACT_RADIUS := 90.0
 
+# 文字排版：字号按“能不能放进圆”算（口径在 pet/text_fit.gd，可单测）
+# 显式 preload：不依赖工程的类缓存（class_name 需要编辑器导入过才登记）
+const TextFit := preload("res://text_fit.gd")
+const TEXT_MARGIN := 6.0      # 文字两侧与圆周留的空隙
+const TEXT_BASE_SIZE := 20    # 第一行想用的字号（放不下会自动缩）
+const TEXT_MIN_SIZE := 10     # 再小就不缩了（宁可压线，也不要看不见）
+
 var hook: KeyCountHook
 var win: KeyCountWindow
 var store: KeyCountStore
@@ -339,12 +346,22 @@ func _draw() -> void:
 	draw_circle(c, r * breath, col)
 	draw_arc(c, r * breath, 0.0, TAU, 64, Color(1, 1, 1, 0.85), 3.0)
 
-	# 注意：Godot 默认字体不含中文字形，这里先用 ASCII，中文字体是待办
+	# 注意：Godot 默认字体不含中文字形，这里先用 ASCII，中文字体是待办。
+	# 每行字号按“能不能放进圆弦”算（口径在 text_fit.gd）：用**这个状态的**半径，
+	# 所以字号跟着圆一起变（只在状态切换时变，不跟呼吸每帧抖）。
 	var font := ThemeDB.fallback_font
-	draw_string(font, c + Vector2(-90, 0), "today %d keys" % today_total,
-			HORIZONTAL_ALIGNMENT_CENTER, 180, 20, Color(1, 1, 1, 0.95))
-	draw_string(font, c + Vector2(-90, 22), "%.0f kpm  %s" % [kpm(), state_name],
-			HORIZONTAL_ALIGNMENT_CENTER, 180, 14, Color(1, 1, 1, 0.75))
+	_draw_line(font, c, "today %d keys" % today_total, 0.0, TEXT_BASE_SIZE, 0.95, r)
+	_draw_line(font, c, "%.0f kpm  %s" % [kpm(), state_name], 22.0, 14, 0.75, r)
 	if not _db_ok:
-		draw_string(font, c + Vector2(-90, 40), "DB UNAVAILABLE",
-				HORIZONTAL_ALIGNMENT_CENTER, 180, 12, Color(1, 0.8, 0.8, 0.95))
+		_draw_line(font, c, "DB UNAVAILABLE", 40.0, 12, 0.95, r, Color(1, 0.8, 0.8))
+
+# 画一行居中的文字：字号先按“能不能放进这个半径的圆弦”缩，再按可用宽度居中。
+# 为什么不能用固定宽度的盒子：盒子比圆宽（180 > idle 直径 148），draw_string 又不会缩字号 ⇒
+# 数字一变长就出圈（实测："today 11992 keys" size20 = 166px）。详见 pet/text_fit.gd。
+func _draw_line(font: Font, center: Vector2, text: String, dy: float, base_size: int,
+		alpha: float, radius: float, tint: Color = Color(1, 1, 1)) -> void:
+	var y_top := TextFit.top_y(dy, base_size)
+	var budget := TextFit.width_budget(radius, y_top, TEXT_MARGIN)
+	var size := TextFit.fit_size(font, text, base_size, TEXT_MIN_SIZE, radius, y_top, TEXT_MARGIN)
+	draw_string(font, center + Vector2(-budget / 2.0, dy), text,
+			HORIZONTAL_ALIGNMENT_CENTER, budget, size, Color(tint.r, tint.g, tint.b, alpha))

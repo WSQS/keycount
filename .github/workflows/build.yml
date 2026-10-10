@@ -120,6 +120,15 @@ jobs:
           fi
           echo "project.godot 解析正常"
 
+      - name: 文字排版口径单测（headless，不需要真实桌面）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 回归对象：数字一变长，英文字母就跑到圆外（原来用固定 180px 盒子 + 固定字号）。
+          # 这是纯函数口径（pet/text_fit.gd），所以能 headless 跑、能进 CI。
+          godot=./.ci/godot/Godot_v${GODOT_VERSION}-stable_win64_console.exe
+          "$godot" --headless --path pet --script test_text_fit.gd
+
       - name: 编扩展（debug + release）
         shell: bash
         run: |
