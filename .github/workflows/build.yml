@@ -179,12 +179,18 @@ jobs:
           ls -la dist/
 
       - name: 组装发布包（+ sha256）
+        id: pkg
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           # 版本号由上一个步骤注入（tag→v0.1.YYYYMMDD / push→sha-xxxxxxx），这里只管打包
           $version = $env:VERSION
           if (-not $version) { throw "VERSION 环境变量为空（版本注入那步没跑？）" }
+          # artifact 名不能直接用 ${{ github.ref_name }}：在 PR 上它是 "1/merge"（refs/pull/1/merge 的短名），
+          # 带斜杠 ⇒ upload-artifact 报 "The artifact name is not valid"（实测踩过：PR 上 build 必红）。
+          # 所以在这里洗干净、并通过 step output 传出去（GITHUB_ENV 的变量进不了 `${{ env }}` 上下文）。
+          $safe = ($version -replace '[^A-Za-z0-9._-]', '-') + "-$(($env:GITHUB_SHA).Substring(0,7))"
+          "artifact=keycount-windows-x64-$safe" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
           Copy-Item packaging/start.cmd, packaging/start.ps1, packaging/README.txt, packaging/override.cfg dist/
           # 版本号也写进 override.cfg：实测导出版**读不到 pck 里的自定义键**，只认 exe 旁边的这个文件。
           # （渲染器那次同一条结论；所以“导出版要用的配置”都放这里）
@@ -204,9 +210,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          # 不用 ${{ env.VERSION }}：GITHUB_ENV 写进去的变量不会回填到表达式上下文（Actions 的坑）。
-          # 用 ref_name 就够（push 到 main 是 main，tag 是 v0.1.0）；版本号本身在 zip 文件名里。
-          name: keycount-windows-x64-${{ github.ref_name }}
+          # 用上一步算好的安全名字（见那条注释：github.ref_name 在 PR 上是 "1/merge"，带斜杠会报错）
+          name: ${{ steps.pkg.outputs.artifact }}
           path: |
             keycount-windows-x64-*.zip
             keycount-windows-x64-*.zip.sha256
