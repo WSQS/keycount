@@ -14,7 +14,7 @@
 # 退出码：0 = 全部符合预期；1 = 有不符合；2 = 找不到窗口
 param(
   [string]$Proc = "keycount",
-  [double]$Radius = 90,          # 必须与 pet.gd 里的 INTERACT_RADIUS 一致
+  [double]$Radius = 0,           # 0 = 从宠物日志的 circle= 读（圆会被数字撑大，写死会假红）
   [int]$DeadlineMs = 300,        # 切换必须在这个时间内完成（实测只要 0～11ms，留足余量）
   [string]$OutDir = "$env:TEMP\kc-clickthrough"
 )
@@ -59,7 +59,20 @@ $parts = [CT]::R($hw).Split(",")
 [int]$X = $parts[0]; [int]$Y = $parts[1]; [int]$W = $parts[2]; [int]$H = $parts[3]
 $cx = $X + [int]($W / 2); $cy = $Y + [int]($H / 2)
 $savedCursor = [CT]::Cursor()
-Write-Output ("窗口 0x{0:X} 中心 ({1},{2})  采样半径 {3}" -f [int64]$hw, $cx, $cy, $Radius)
+
+# 半径：优先从宠物自己的日志读（ALIVE ... circle=NN）。
+# 圆的大小随数字长度变（数字变长 → 圈变大），写死一个数会在数字变长后假红 ——
+# 这正是这条判据以前的问题。日志里的 circle 是**画的圆**，命中/穿透用的是它 + 6px 晕。
+if ($Radius -le 0) {
+  $logPath = Join-Path $env:APPDATA "Godot\app_userdata\keycount pet\run.log"
+  if (Test-Path $logPath) {
+    $tail = (Get-Content $logPath -Tail 40) -join " "
+    $m = [regex]::Matches($tail, 'circle=(\d+)')
+    if ($m.Count -gt 0) { $Radius = [double]$m[$m.Count - 1].Groups[1].Value + 6.0 }
+  }
+  if ($Radius -le 0) { Write-Output "⚠️ 读不到日志里的 circle=，退回 96"; $Radius = 96 }
+}
+Write-Output ("窗口 0x{0:X} 中心 ({1},{2})  判据半径 {3}（圆 + 晕）" -f [int64]$hw, $cx, $cy, $Radius)
 
 $inside = [Math]::Round($Radius - 12)
 $outside = [Math]::Round($Radius + 12)

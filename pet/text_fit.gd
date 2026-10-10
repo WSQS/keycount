@@ -18,8 +18,29 @@ static func chord_half_width(radius: float, y: float) -> float:
 static func width_budget(radius: float, y_top: float, margin: float) -> float:
 	return 2.0 * maxf(chord_half_width(radius, y_top) - margin, 0.0)
 
+## `width_budget` 的**反函数**：要让这行文字放得下，圆至少要多大？
+## 由 width_budget(r, y) ≥ w 解出：r ≥ sqrt((w/2 + margin)² + y²)
+##
+## 这是“圈变大”那条路的依据：数字变长时先拿它把圆撑大，
+## 而不是一上来就缩字号（字号是主角，圆是配角）。
+static func radius_needed(text_width: float, y_top: float, margin: float) -> float:
+	var half := text_width / 2.0 + margin
+	return sqrt(half * half + y_top * y_top)
+
+## 好几行一起看：需要多大的圆？（取各行需求的最大值）
+## lines: [{"text": String, "dy": float, "base": int}, ...]
+static func radius_for_lines(font: Font, lines: Array, margin: float) -> float:
+	var need := 0.0
+	for l in lines:
+		var w: float = font.get_string_size(l["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, int(l["base"])).x
+		need = maxf(need, radius_needed(w, top_y(float(l["dy"]), int(l["base"])), margin))
+	return need
+
 ## 把一行文字缩到能放进圆弦里，返回字号（不小于 min_size）。
 ## 传 y_top 而不是基线：文字**顶端**那一行最窄，按它算才保守。
+##
+## 注意：这是**兜底**路径 —— 正常情况应当先把圆撑大（见 radius_needed）；
+## 只有圆已经到窗口能装下的上限时，才回头缩字号。
 static func fit_size(font: Font, text: String, base_size: int, min_size: int,
 		radius: float, y_top: float, margin: float) -> int:
 	var budget := width_budget(radius, y_top, margin)

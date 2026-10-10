@@ -70,11 +70,17 @@ Start-Sleep -Milliseconds 200
 # 同时盯“光标有没有被真实鼠标抢走”：SetCursorPos 会被人的手覆盖（实测碰到过），
 # 那种情况不能判成“拖动跟丢”（假红），只能报“测不准”。
 $stolen = 0
+$midX = -999
+$midAt = [int]($steps / 2)
 for ($i = 1; $i -le $steps; $i++) {
   [void][DragTest]::SetCursorPos($cx + $i, $cy + $i)
   Start-Sleep -Milliseconds 1
   [void][DragTest]::GetCursorPos([ref]$pt)
   if ([Math]::Abs($pt.X - ($cx + $i)) -gt 3 -or [Math]::Abs($pt.Y - ($cy + $i)) -gt 3) { $stolen++ }
+  if ($i -eq $midAt) {
+    # 记住中点：失败时能看出“从一开始就跟不上”还是“半路卡住”
+    $midX = [int]([DragTest]::Rect($hwnd).Split(",")[0]) - $bL
+  }
 }
 [DragTest]::mouse_event([DragTest]::LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 400
@@ -101,6 +107,6 @@ if ([Math]::Abs($dx - $steps) -le 5 -and [Math]::Abs($dy - $steps) -le 5) {
   Write-Output "跟随判据：窗口位移 ≈ 光标位移 ✅"
   exit 0
 } else {
-  Write-Output "跟随判据：窗口落后/抖动 ❌（光标走了 ($steps, $steps) px，窗口只走了 ($dx, $dy) px）"
+  Write-Output "跟随判据：窗口落后/抖动 ❌（光标走了 ($steps, $steps) px，窗口只走了 ($dx, $dy) px；中点时只走了 $midX / $midAt px）"
   exit 1
 }

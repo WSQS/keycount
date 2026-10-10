@@ -18,9 +18,13 @@ const FLUSH_EVENTS := 200                    # 或攒够 200 下就落
 const SLEEPY_AFTER := 180.0                  # 静默多久打瞌睡
 const EXCITED_KPM := 400.0                   # 多快算兴奋
 
-# 点击穿透的口径：距窗口中心这个半径内算「宠物本体」（可点、可拖）；外面（那圈透明角）
-# 让鼠标穿透到下面的窗口。拖动命中判定用的也是它 —— 一个口径只写一处。
-const INTERACT_RADIUS := 90.0
+# 命中/穿透的口径：**跟着画出来的圆走**（圆会被数字撑大），外加一个小晕让边缘好点。
+const INTERACT_HALO := 6.0
+
+# 圆的基准半径（idle）与上限：窗口是 380×380，再大就被切了。
+# 数字变长时优先把圆撑大（圈是配角，数字是主角），只有到上限才回头缩字号。
+const CIRCLE_BASE_RADIUS := 74.0
+const CIRCLE_MAX_RADIUS := 176.0
 
 # 文字排版：字号按“能不能放进圆”算（口径在 pet/text_fit.gd，可单测）
 # 显式 preload：不依赖工程的类缓存（class_name 需要编辑器导入过才登记）
@@ -56,6 +60,7 @@ var _focus_true_frames: int = 0
 var _input_key_count: int = 0
 var _dragging: bool = false
 var _click_through: bool = false            # 当前窗口是否处于「穿透」状态（只在变化时才改样式）
+var _circle_radius: float = CIRCLE_BASE_RADIUS  # 上一帧画出来的圆半径（命中/穿透跟着它）
 var _drag_offset: Vector2i = Vector2i.ZERO   # 抓取点相对窗口左上角的偏移（绝对坐标法用）
 var _db_ok: bool = false
 
@@ -256,11 +261,11 @@ func _process(_delta: float) -> void:
 
 	if now - _log_t >= 1.0:
 		_log_t = now
-		_logline("ALIVE state=%s total=%d kpm=%.0f idle=%.0fs pending=%d/%d focused=%s input_keys=%d db=%s through=%s" % [
+		_logline("ALIVE state=%s total=%d kpm=%.0f idle=%.0fs pending=%d/%d focused=%s input_keys=%d db=%s through=%s circle=%.0f" % [
 			state_name, today_total, rate, idle_for,
 			_pending.size(), _pending_events,
 			str(get_window().has_focus()), _input_key_count,
-			"ok" if _db_ok else "FAIL", str(_click_through),
+			"ok" if _db_ok else "FAIL", str(_click_through), _circle_radius,
 		])
 	queue_redraw()
 
@@ -278,7 +283,7 @@ func _update_click_through() -> void:
 		want = false
 	else:
 		var local := DisplayServer.mouse_get_position() - DisplayServer.window_get_position()
-		want = local.distance_to(get_viewport_rect().size / 2.0) > INTERACT_RADIUS
+		want = local.distance_to(get_viewport_rect().size / 2.0) > _interact_radius()
 	if want == _click_through:
 		return # 只在变化时改样式（SetWindowLongPtr 不值得每帧调）
 	_click_through = want
@@ -308,7 +313,7 @@ func _shutdown() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			if event.position.distance_to(get_viewport_rect().size / 2.0) < INTERACT_RADIUS:
+			if event.position.distance_to(get_viewport_rect().size / 2.0) < _interact_radius():
 				_dragging = true
 				# 绝对坐标：记下抓取点相对窗口左上角的偏移，之后每次直接把窗口摆到
 				# “光标 - 偏移”。不能累加 event.relative —— 我们在移动自己所在的窗口，
@@ -327,33 +332,55 @@ func _input(event: InputEvent) -> void:
 
 func _draw() -> void:
 	var c := get_viewport_rect().size / 2.0
-	var r := 74.0
+	var r_state := CIRCLE_BASE_RADIUS
 	var col := Color(0.35, 0.75, 0.95, 0.85)
 	match state_name:
 		"typing":
 			col = Color(0.30, 0.90, 0.70, 0.90)
-			r = 80.0
+			r_state = 80.0
 		"excited":
 			col = Color(1.00, 0.72, 0.20, 0.95)
-			r = 88.0
+			r_state = 88.0
 		"sleepy":
 			col = Color(0.50, 0.50, 0.65, 0.70)
-			r = 66.0
+			r_state = 66.0
 	if not _db_ok:
 		col = Color(0.85, 0.25, 0.25, 0.85)   # 存不下去就变红，不许假装正常
+
+	# 注意：Godot 默认字体不含中文字形，这里先用 ASCII，中文字体是待办。
+	var font := ThemeDB.fallback_font
+	var lines := _text_lines()
+	# **先按文字把圆撑大**（数字是这个宠物的主角，不该为了塞进小圆而把字缩小）：
+	# 状态之间的差异照旧保留 —— 需要多出来的那部分由所有状态一起让出（相加，不是覆盖）。
+	var r_needed := TextFit.radius_for_lines(font, lines, TEXT_MARGIN)
+	var r := minf(r_state + maxf(0.0, r_needed - CIRCLE_BASE_RADIUS), CIRCLE_MAX_RADIUS)
+	_circle_radius = r
+
 	var speed := 1.2 if state_name == "typing" else 0.6
 	var breath := 1.0 + 0.06 * sin(_now() * speed)
 	draw_circle(c, r * breath, col)
 	draw_arc(c, r * breath, 0.0, TAU, 64, Color(1, 1, 1, 0.85), 3.0)
 
-	# 注意：Godot 默认字体不含中文字形，这里先用 ASCII，中文字体是待办。
-	# 每行字号按“能不能放进圆弦”算（口径在 text_fit.gd）：用**这个状态的**半径，
-	# 所以字号跟着圆一起变（只在状态切换时变，不跟呼吸每帧抖）。
-	var font := ThemeDB.fallback_font
-	_draw_line(font, c, "today %d keys" % today_total, 0.0, TEXT_BASE_SIZE, 0.95, r)
-	_draw_line(font, c, "%.0f kpm  %s" % [kpm(), state_name], 22.0, 14, 0.75, r)
+	# 字号保持基准；只有圆已经碰到窗口上限（CIRCLE_MAX_RADIUS）时才回头缩字（fit_size 兜底）
+	for l in lines:
+		_draw_line(font, c, l["text"], float(l["dy"]), int(l["base"]), float(l["alpha"]), r, l["tint"])
+
+# 要画的那几行（文字 / 基线偏移 / 基准字号 / 透明度 / 颜色）
+func _text_lines() -> Array:
+	var out := [
+		{ "text": "today %d keys" % today_total, "dy": 0.0, "base": TEXT_BASE_SIZE,
+			"alpha": 0.95, "tint": Color(1, 1, 1) },
+		{ "text": "%.0f kpm  %s" % [kpm(), state_name], "dy": 22.0, "base": 14,
+			"alpha": 0.75, "tint": Color(1, 1, 1) },
+	]
 	if not _db_ok:
-		_draw_line(font, c, "DB UNAVAILABLE", 40.0, 12, 0.95, r, Color(1, 0.8, 0.8))
+		out.append({ "text": "DB UNAVAILABLE", "dy": 40.0, "base": 12,
+			"alpha": 0.95, "tint": Color(1, 0.8, 0.8) })
+	return out
+
+# “宠物本体”的半径：跟 _draw 画出来的圆一致（+小晕），命中与穿透都用它
+func _interact_radius() -> float:
+	return _circle_radius + INTERACT_HALO
 
 # 画一行居中的文字：字号先按“能不能放进这个半径的圆弦”缩，再按可用宽度居中。
 # 为什么不能用固定宽度的盒子：盒子比圆宽（180 > idle 直径 148），draw_string 又不会缩字号 ⇒
